@@ -3,8 +3,8 @@ import smtplib
 from email.message import EmailMessage
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from config import SMTP_SERVER, SMTP_PORT, EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECEIVER
-from logger import get_logger
+from config.settings import SMTP_SERVER, SMTP_PORT, EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECEIVER
+from core.scrapers.logger import get_logger
 
 _log = get_logger("notifier")
 

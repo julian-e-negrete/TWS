@@ -1,16 +1,25 @@
-# scrapers/binance/run.py — P7 Binance kline monitor / SPEC §1 P7 / T-MOD-1
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
+# scrapers/binance/run.py
+import sys
+import os
+# Add parent directory to path so imports work
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import time
 import pandas as pd
 from binance import ThreadedWebsocketManager
-from logger import get_logger
-from fetch import log_ws_message
-from notifier import notify
+from scrapers.logger import get_logger  # Changed from core.scrapers.logger
+from scrapers.fetch import log_ws_message  # Changed from core.scrapers.fetch
+# from scrapers.notifier import notify  # Changed from core.scrapers.notifier
 from shared.db_pool import get_conn, put_conn
 from shared.models import BinanceTick, BinanceTrade
 from pydantic import ValidationError
-from config import BINANCE_API_KEY, BINANCE_SECRET_KEY, INTERVAL, LOOKBACK
+from config.settings import settings
+
+# Get config from settings
+BINANCE_API_KEY = settings.binance.api_key
+BINANCE_SECRET_KEY = settings.binance.secret_key
+INTERVAL = settings.binance.interval
+LOOKBACK = settings.binance.lookback
 
 _log = get_logger("binance")
 INSERT_SQL = """
@@ -81,7 +90,8 @@ class BinanceMonitor:
         except Exception as e:
             _log.error("trade validation failed: %s", e)
             return
-        self._insert_trade(trade)
+        print("Parsed trade:", trade)
+        # self._insert_trade(trade)
 
     def process_message(self, msg, symbol):
         if msg.get("e") == "error":
@@ -103,9 +113,9 @@ class BinanceMonitor:
             _log.error("binance tick validation failed: %s", e)
             return
 
-        if float(tick.volume) > 0:
-            self._insert(tick)
-
+        # if float(tick.volume) > 0:
+        #     self._insert(tick)
+        print("Parsed tick:", tick)
         df = self.data_map[symbol]
         df = pd.concat([df, pd.DataFrame([tick.model_dump()])]).drop_duplicates(subset="timestamp").tail(LOOKBACK)
         self.data_map[symbol] = df

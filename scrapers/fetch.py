@@ -1,5 +1,5 @@
 # HTTP + WebSocket I/O helpers with logging — T-OBS-1, T-OBS-2 / SPEC §2.3
-from logger import get_logger
+from scrapers.logger import get_logger
 
 _log = get_logger("io")
 _MAX_BODY = 4096  # bytes

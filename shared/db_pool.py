@@ -2,7 +2,16 @@
 import time
 import psycopg2
 import psycopg2.pool
-from config import PG_HOST, PG_PORT, PG_DBNAME, PG_USER, PG_PASSWORD
+from config.settings import settings  # Fixed: settings not setting
+
+# Then use settings instead of individual variables
+# Instead of: from config.setting import PG_HOST, PG_PORT, PG_DBNAME, PG_USER, PG_PASSWORD
+# Use:
+PG_HOST = settings.postgres.host
+PG_PORT = settings.postgres.port
+PG_DBNAME = settings.postgres.db
+PG_USER = settings.postgres.user
+PG_PASSWORD = settings.postgres.password
 
 _DSN = dict(host=PG_HOST, port=PG_PORT, dbname=PG_DBNAME,
             user=PG_USER, password=PG_PASSWORD, sslmode="disable")

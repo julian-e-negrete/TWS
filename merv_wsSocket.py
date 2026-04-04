@@ -72,31 +72,10 @@ def on_message(ws, message):
     except (IndexError, ValueError):
         return  # malformed message — skip silently
 
-    conn = get_conn()
-    try:
-        cur = conn.cursor()
-        query = """
-    INSERT INTO ticks (
-        time, instrument, bid_volume, bid_price,
-        ask_price, ask_volume, last_price, total_volume,
-        low, high, prev_close
-    )
-    VALUES (
-        %(timestamp)s, %(instrument)s, %(bid_volume)s, %(bid_price)s,
+    print("""%(timestamp)s, %(instrument)s, %(bid_volume)s, %(bid_price)s,
         %(ask_price)s, %(ask_volume)s, %(last_price)s, %(total_volume)s,
-        %(low)s, %(high)s, %(prev_close)s
-    )
-    """
-        cur.execute(query, output)
-        conn.commit()
-        cur.close()
-    finally:
-        put_conn(conn)
-
-    #headers = output.keys()
-    #print(tabulate([output.values()], headers=headers, tablefmt="plain"))
-    #    print("Parsed data:", output)
-
+        %(low)s, %(high)s, %(prev_close)s""")
+        
 
 def on_error(ws, error):
     print("Error:", error)
