@@ -1,0 +1,11 @@
+pandas
+numpy
+psycopg2-binary
+scipy
+sqlalchemy
+python-dotenv
+redis
+QuantLib
+arch
+pydantic
+pydantic-settings
