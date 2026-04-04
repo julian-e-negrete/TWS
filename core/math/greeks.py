@@ -10,19 +10,19 @@ except ImportError:
 def greeks_scipy(S, K, T, r, sigma, opt_type='C'):
     """
     Calculate Greeks using finite differences and Scipy BS.
-    Returns (delta, gamma, vega, theta).
+    Returns (delta, gamma, vega, theta, rho).
     """
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
-        return np.nan, np.nan, np.nan, np.nan
+        return (np.nan,) * 5
         
     h = 0.001
     p0 = black_scholes(S, K, T, r, sigma, opt_type)
     
     # Delta & Gamma (Spot shift)
-    p_u = black_scholes(S * (1 + h), K, T, r, sigma, opt_type)
-    p_d = black_scholes(S * (1 - h), K, T, r, sigma, opt_type)
-    delta = (p_u - p_d) / (2 * S * h)
-    gamma = (p_u - 2 * p0 + p_d) / (S * h)**2
+    p_u = black_scholes(S + h, K, T, r, sigma, opt_type)
+    p_d = black_scholes(S - h, K, T, r, sigma, opt_type)
+    delta = (p_u - p_d) / (2 * h)
+    gamma = (p_u - 2 * p0 + p_d) / h**2
     
     # Vega (Vol shift)
     p_v = black_scholes(S, K, T, r, sigma + h, opt_type)
@@ -34,7 +34,11 @@ def greeks_scipy(S, K, T, r, sigma, opt_type='C'):
     p_t = black_scholes(S, K, T_next, r, sigma, opt_type)
     theta = (p_t - p0) * 365.0  # Annualized theta
     
-    return delta, gamma, vega, theta
+    # Rho (Rate shift)
+    p_r = black_scholes(S, K, T, r + h, sigma, opt_type)
+    rho = (p_r - p0) / h
+    
+    return delta, gamma, vega, theta, rho
 
 def greeks_quantlib(S, K, T, r, sigma, opt_type='C', expiry_date=None):
     """

@@ -2,3 +2,4 @@
 .kiro/steering
 .kiro/agents
 **/__pycache__/
+docs/
