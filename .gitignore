@@ -3,3 +3,4 @@
 .kiro/agents
 **/__pycache__/
 docs/
+tws_terminal/target/
