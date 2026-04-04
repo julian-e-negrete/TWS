@@ -29,8 +29,31 @@ def _make_pool(retries=10, delay=3):
 
 _pool = _make_pool()
 
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+
+_pg_engine = None
+_mysql_engine = None
+
+def get_pg_engine() -> Engine:
+    global _pg_engine
+    if _pg_engine is None:
+        dsn = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DBNAME}"
+        _pg_engine = create_engine(dsn)
+    return _pg_engine
+
+def get_mysql_engine() -> Engine:
+    global _mysql_engine
+    if _mysql_engine is None:
+        # Using DatabaseSettings for MySQL
+        m = settings.db
+        dsn = f"mysql+pymysql://{m.user}:{m.password}@{m.host}:{m.port}/{m.name}"
+        _mysql_engine = create_engine(dsn)
+    return _mysql_engine
+
 def get_conn():
     global _pool
+    # ... rest of the file
     try:
         conn = _pool.getconn()
         # Verify connection is alive

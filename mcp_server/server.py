@@ -21,8 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import psycopg2.extras
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import text
-from finance.utils.cache import get as cache_get, set as cache_set, TTL_MARKET, TTL_HISTORICAL
-from finance.utils.db_pool import get_pg_engine, get_mysql_engine
+from data.cache import cache_get, cache_set, TTL_MARKET, TTL_HISTORICAL
+from shared.db_pool import get_pg_engine, get_mysql_engine
 
 mcp = FastMCP("algotrading-db")
 

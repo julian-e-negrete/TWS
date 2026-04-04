@@ -1,6 +1,7 @@
 import psycopg2
 import pandas as pd
-from .config import dbname, user, password, host, port
+from config.settings import settings
+dbname, user, password, host, port = settings.postgres.db, settings.postgres.user, settings.postgres.password, settings.postgres.host, settings.postgres.port
 from .cache import cache_get, cache_set
 from datetime import datetime, timedelta
 

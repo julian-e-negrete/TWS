@@ -5,6 +5,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# TTL for cache in seconds
+TTL_MARKET = 60      # 1 minute for live data
+TTL_HISTORICAL = 3600 # 1 hour for historical data
+
 _client = None
 
 def _get_client():

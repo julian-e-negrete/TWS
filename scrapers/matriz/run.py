@@ -4,9 +4,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 import json
 from datetime import datetime
 import websocket
-from logger import get_logger
-from fetch import log_ws_message
-from notifier import notify
+from scrapers.logger import get_logger
+from scrapers.fetch import log_ws_message
+from scrapers.notifier import notify
 from shared.db_pool import get_conn, put_conn
 from shared.models import Tick
 from pydantic import ValidationError

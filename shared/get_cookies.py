@@ -4,8 +4,8 @@ import sys, os, json, requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from playwright.sync_api import sync_playwright
 from shared.db_pool import get_conn, put_conn
-from config import MATRIZ_USER, MATRIZ_PASS
-from logger import get_logger
+# from config import MATRIZ_USER, MATRIZ_PASS — logic moved to settings.matriz.user/password
+from scrapers.logger import get_logger
 
 _log = get_logger("cookies")
 
@@ -145,8 +145,8 @@ def _playwright_login() -> tuple[str, str, str]:
         page.on("response", on_response)
         page.goto("https://matriz.eco.xoms.com.ar/", wait_until="domcontentloaded", timeout=30000)
         page.wait_for_selector("#loginScreen_input_user", timeout=20000)
-        page.fill("#loginScreen_input_user", MATRIZ_USER)
-        page.fill("#loginScreen_input_password", MATRIZ_PASS)
+        page.fill("#loginScreen_input_user", settings.matriz.user)
+        page.fill("#loginScreen_input_password", settings.matriz.password)
         page.click("#loginScreen_button_submit")
         page.wait_for_timeout(10000)
         cookies = ctx.cookies()

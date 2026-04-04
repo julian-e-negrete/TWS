@@ -1,6 +1,7 @@
 import pandas as pd
 import psycopg2
-from .config import dbname, user, password, host, port
+from config.settings import settings
+dbname, user, password, host, port = settings.postgres.db, settings.postgres.user, settings.postgres.password, settings.postgres.host, settings.postgres.port
 
 BINANCE_SYMBOLS = ['BTCUSDT', 'USDTARS']
 

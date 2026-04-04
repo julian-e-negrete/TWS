@@ -4,7 +4,7 @@ import requests
 import locale
 from datetime import datetime
 # SPEC §6.4 T-DB-2 — use connection pool
-import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import sys, os; sys.path.insert(0, os.path.dirname(__file__))
 from shared.db_pool import get_conn, put_conn
 from shared.get_cookies import get_cookies, get_ws_url, get_active_gfgc_topics
 

@@ -5,9 +5,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 import json
 import aiohttp
 import pandas as pd
-from logger import get_logger
-from fetch import async_fetch
-from notifier import notify
+from scrapers.logger import get_logger
+from scrapers.fetch import async_fetch
+from scrapers.notifier import notify
 
 _log = get_logger("byma")
 URL = "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/cedears"

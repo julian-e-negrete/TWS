@@ -3,10 +3,17 @@ import smtplib
 from email.message import EmailMessage
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from config.settings import SMTP_SERVER, SMTP_PORT, EMAIL_SENDER, EMAIL_PASSWORD, EMAIL_RECEIVER
-from core.scrapers.logger import get_logger
+from config.settings import settings
+from scrapers.logger import get_logger
 
 _log = get_logger("notifier")
+
+# Use settings instead of individual variables
+SMTP_SERVER = settings.mail.server
+SMTP_PORT = settings.mail.port
+EMAIL_SENDER = settings.mail.mail_from
+EMAIL_PASSWORD = settings.mail.password
+EMAIL_RECEIVER = settings.mail.mail_to
 
 def notify(platform: str, error: Exception) -> None:
     msg = EmailMessage()

@@ -4,9 +4,9 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 import aiohttp
 import pandas as pd
-from logger import get_logger
-from fetch import async_fetch
-from notifier import notify
+from scrapers.logger import get_logger
+from scrapers.fetch import async_fetch
+from scrapers.notifier import notify
 
 _log = get_logger("mae")
 URL = "https://api.marketdata.mae.com.ar/api/mercado/datos/FOR"
