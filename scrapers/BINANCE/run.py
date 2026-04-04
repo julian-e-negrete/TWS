@@ -14,6 +14,8 @@ from shared.db_pool import get_conn, put_conn
 from shared.models import BinanceTick, BinanceTrade
 from pydantic import ValidationError
 from config.settings import settings
+import redis
+import json
 
 # Get config from settings
 BINANCE_API_KEY = settings.binance.api_key
@@ -39,6 +41,13 @@ class BinanceMonitor:
         self.last_len = {s: 0 for s in symbols}
         self.twm = None
         self._last_msg = 0
+        # Add Redis connection
+        self.redis_client = redis.Redis(
+            host='localhost', 
+            port=6379, 
+            decode_responses=True,
+            db=0
+        )
 
     def _insert(self, tick: BinanceTick):
         conn = get_conn()
@@ -90,7 +99,18 @@ class BinanceMonitor:
         except Exception as e:
             _log.error("trade validation failed: %s", e)
             return
-        print("Parsed trade:", trade)
+        # print("Parsed trade:", trade)
+        self.redis_client.publish(
+            'binance_trades',
+            json.dumps({
+                'symbol': symbol,
+                'time': trade.time.isoformat(),
+                'price': float(trade.price),
+                'quantity': float(trade.qty),
+                'is_buyer_maker': trade.is_buyer_maker,
+                'trade_id': trade.trade_id
+            })
+        )
         # self._insert_trade(trade)
 
     def process_message(self, msg, symbol):
@@ -115,7 +135,19 @@ class BinanceMonitor:
 
         # if float(tick.volume) > 0:
         #     self._insert(tick)
-        print("Parsed tick:", tick)
+        # print("Parsed tick:", tick)
+        self.redis_client.publish(
+            'binance_ticks',
+            json.dumps({
+                'symbol': symbol,
+                'timestamp': tick.timestamp.isoformat(),
+                'open': float(tick.open),
+                'high': float(tick.high),
+                'low': float(tick.low),
+                'close': float(tick.close),
+                'volume': float(tick.volume)
+            })
+        )
         df = self.data_map[symbol]
         df = pd.concat([df, pd.DataFrame([tick.model_dump()])]).drop_duplicates(subset="timestamp").tail(LOOKBACK)
         self.data_map[symbol] = df
