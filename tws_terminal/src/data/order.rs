@@ -1,6 +1,7 @@
 #[derive(Clone, Debug)]
 pub struct Order {
     pub id: u32,
+    pub exchange: String,
     pub side: String,
     pub price: f64,
     pub quantity: u32,
@@ -8,7 +9,7 @@ pub struct Order {
 }
 
 impl Order {
-    pub fn new(side: String, price: f64, quantity: u32) -> Self {
+    pub fn new(side: String, price: f64, quantity: u32, exchange: String) -> Self {
         static mut NEXT_ID: u32 = 1;
         
         let id = unsafe {
@@ -19,6 +20,7 @@ impl Order {
         
         Self {
             id,
+            exchange,
             side,
             price,
             quantity,

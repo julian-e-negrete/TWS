@@ -1,28 +1,48 @@
 use anyhow::Result;
 use tokio::sync::mpsc::UnboundedSender;
 use crate::network::WebSocketMessage;
-use crate::data::Order;
+use rand::Rng;
 
-// Mock WebSocket implementation - replace with your actual API
+// Use a thread-local RNG that doesn't need to be Send
 pub async fn connect_websocket(tx: UnboundedSender<WebSocketMessage>) -> Result<()> {
-    // Simulate connection
-    let _ = tx.send(WebSocketMessage::Connected);
+    // Simulate connection to both exchanges
+    let _ = tx.send(WebSocketMessage::Connected("binance".to_string()));
+    let _ = tx.send(WebSocketMessage::Connected("merval".to_string()));
     
-    // Simulate price updates (replace with actual WebSocket)
-    for i in 0..100 {
-        let price = 45000.0 + (i as f64 * 10.0).sin() * 100.0;
-        let _ = tx.send(WebSocketMessage::PriceUpdate(price));
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    let mut binance_price = 45000.0;
+    let mut merval_price = 125000.0;
+    
+    // Simulate price updates for both exchanges
+    for _ in 0..1000 {
+        // Generate random values without holding RNG across await
+        let (binance_change, binance_volume, merval_change, merval_volume) = {
+            let mut rng = rand::thread_rng();
+            (
+                (rng.gen::<f64>() - 0.5) * 0.01,
+                rng.gen::<f64>() * 100.0,
+                (rng.gen::<f64>() - 0.5) * 0.004,
+                rng.gen::<f64>() * 1000000.0,
+            )
+        };
+        
+        // Binance: Crypto-style volatility
+        binance_price *= 1.0 + binance_change;
+        let _ = tx.send(WebSocketMessage::PriceUpdate(
+            "binance".to_string(),
+            binance_price,
+            binance_volume
+        ));
+        
+        // MERVAL: Stock market style
+        merval_price *= 1.0 + merval_change;
+        let _ = tx.send(WebSocketMessage::PriceUpdate(
+            "merval".to_string(),
+            merval_price,
+            merval_volume
+        ));
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
     }
-    
-    // Example: Connect to real WebSocket
-    // use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-    // let (mut ws_stream, _) = connect_async("wss://your-api.com/ws").await?;
-    // while let Some(msg) = ws_stream.next().await {
-    //     if let Ok(Message::Text(text)) = msg {
-    //         // Parse JSON and send to channel
-    //     }
-    // }
     
     Ok(())
 }

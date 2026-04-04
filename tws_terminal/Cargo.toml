@@ -4,23 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Terminal UI
 ratatui = "0.26"
 crossterm = "0.27"
-
-# Async runtime
 tokio = { version = "1", features = ["full"] }
-
-# WebSocket client
 tokio-tungstenite = "0.21"
 futures-util = "0.3"
-
-# For better error handling
 anyhow = "1.0"
-
-# For timestamp handling
 chrono = "0.4"
-
-# For JSON parsing (if your WebSocket uses JSON)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+rand = "0.8"  # Comment this out if using deterministic version
+redis = { version = "0.24", features = ["tokio-comp", "aio"] }
