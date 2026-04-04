@@ -1082,7 +1082,6 @@ dependencies = [
  "chrono",
  "crossterm",
  "futures-util",
- "rand",
  "ratatui",
  "redis",
  "serde",

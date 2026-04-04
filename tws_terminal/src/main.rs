@@ -15,53 +15,61 @@ use tokio::sync::mpsc;
 use tokio::time;
 
 use ui::app::TradingApp;
-use ui::event_handler::handle_events;
+use ui::event_handler::spawn_input_task;
 use network::websocket::connect_websocket;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Setup terminal
+    // ── Terminal setup ───────────────────────────────────────────────────────
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    
-    // Create channel for WebSocket messages
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    
-    // Start WebSocket connection
+
+    // ── Channel: Redis/websocket → app ───────────────────────────────────────
+    let (ws_tx, mut ws_rx) = mpsc::unbounded_channel();
+
+    // ── Spawn Redis subscriber on a separate Tokio task ──────────────────────
     let ws_handle = tokio::spawn(async move {
-        if let Err(e) = connect_websocket(tx).await {
-            eprintln!("WebSocket error: {}", e);
+        // connect_websocket loops forever with retries — it never returns Ok
+        if let Err(e) = connect_websocket(ws_tx).await {
+            eprintln!("Redis subscriber fatal error: {e}");
         }
     });
-    
-    // Initialize app
+
+    // ── Keyboard input on a dedicated OS thread (blocking read, not async) ───
+    let mut key_rx = spawn_input_task();
+
+    // ── App state ─────────────────────────────────────────────────────────────
     let mut app = TradingApp::new();
-    
-    // Main event loop
-    let tick_rate = time::Duration::from_millis(100);
-    let mut last_tick = tokio::time::Instant::now();
-    
+
+    // ── Render ticker: redraw at ~30 fps regardless of events ─────────────────
+    let mut render_interval = time::interval(time::Duration::from_millis(33));
+
+    // ── Main event loop ───────────────────────────────────────────────────────
     loop {
-        // Check for WebSocket messages
-        while let Ok(msg) = rx.try_recv() {
-            app.handle_websocket_message(msg);
-        }
-        
-        // Draw UI
-        terminal.draw(|f| app.render(f))?;
-        
-        // Handle input
-        if let Some(event) = handle_events(tick_rate, &mut last_tick).await? {
-            if !app.handle_input(event) {
-                break; // Quit if app says so
+        tokio::select! {
+            // Redraw tick
+            _ = render_interval.tick() => {
+                terminal.draw(|f| app.render(f))?;
+            }
+
+            // Redis data message
+            Some(msg) = ws_rx.recv() => {
+                app.handle_websocket_message(msg);
+            }
+
+            // Keyboard input
+            Some(key) = key_rx.recv() => {
+                if !app.handle_input(key) {
+                    break; // 'q' pressed
+                }
             }
         }
     }
-    
-    // Cleanup
+
+    // ── Cleanup ───────────────────────────────────────────────────────────────
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -69,6 +77,6 @@ async fn main() -> Result<()> {
         DisableMouseCapture
     )?;
     ws_handle.abort();
-    
+
     Ok(())
 }

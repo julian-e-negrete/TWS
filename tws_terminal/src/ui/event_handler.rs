@@ -1,19 +1,25 @@
-use crossterm::event::{Event, KeyEvent, poll, read};
-use std::time::Duration;
+use crossterm::event::{Event, KeyEvent};
+use tokio::sync::mpsc;
 
-pub async fn handle_events(
-    tick_rate: Duration,
-    last_tick: &mut tokio::time::Instant,
-) -> anyhow::Result<Option<KeyEvent>> {
-    if poll(Duration::from_millis(50))? {
-        if let Event::Key(key) = read()? {
-            return Ok(Some(key));
+/// Spawn a background blocking thread that reads crossterm events
+/// and forwards them through an mpsc channel.
+/// This prevents the synchronous `crossterm::event::read()` from
+/// blocking the Tokio async executor.
+pub fn spawn_input_task() -> mpsc::UnboundedReceiver<KeyEvent> {
+    let (tx, rx) = mpsc::unbounded_channel();
+
+    std::thread::spawn(move || loop {
+        // `read()` blocks until an event is available — safe in a dedicated OS thread
+        match crossterm::event::read() {
+            Ok(Event::Key(key)) => {
+                if tx.send(key).is_err() {
+                    break; // receiver dropped → app exited
+                }
+            }
+            Ok(_) => {} // ignore mouse, resize, etc.
+            Err(_) => break,
         }
-    }
-    
-    if last_tick.elapsed() >= tick_rate {
-        *last_tick = tokio::time::Instant::now();
-    }
-    
-    Ok(None)
+    });
+
+    rx
 }
