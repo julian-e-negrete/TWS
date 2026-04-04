@@ -1,0 +1,12 @@
+{
+  "name": "GLPI Task Start",
+  "version": "2.0.0",
+  "description": "Before any task begins, open a GLPI ticket and add AlgoTrade Server as requester",
+  "when": {
+    "type": "preTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "MANDATORY: Before doing any work, open a GLPI ticket using the following steps exactly:\n\n1. POST http://100.112.16.115:8080/api/v2.2/token with body: {grant_type:'password', client_id:'5880211c5e72134f1ae47dda08377e4b503bd3d15f93d858dda5ab82a4a000e0', client_secret:'b6d8fbdc08f6443abce916dae0d5184f56793a50782130e3c6fa6153692d165c', username:'AlgoTrade Server', password:'45237348', scope:'api user'} → get access_token\n\n2. POST http://100.112.16.115:8080/api/v2.2/Assistance/Ticket with Authorization: Bearer <token> and body: {name: '<task title>', content: '<what will be done>', type:2, urgency:3, impact:3, priority:3} → get ticket id\n\n3. POST http://100.112.16.115:8080/api/v2.2/Assistance/Ticket/<id>/TeamMember with body: {type:'User', id:13, role:'requester'} — this is MANDATORY, adds AlgoTrade Server as solicitante\n\nSave the ticket id to use when closing. Do NOT start the actual work until these 3 steps are done."
+  }
+}

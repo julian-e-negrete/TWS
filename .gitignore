@@ -1,0 +1,4 @@
+.env
+.kiro/steering
+.kiro/agents
+**/__pycache__/

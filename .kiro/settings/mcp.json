@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "glpi-api-proxy": {
+      "command": "/home/julian/gitRepositories/AlgoTrading/venv/bin/python3",
+      "args": [
+        "/home/julian/gitRepositories/AlgoTrading/mcp_server/glpi_proxy.py"
+      ],
+      "description": "GLPI API Proxy — gestión de tickets e inventario de infraestructura",
+      "autoApprove": [
+        "proxy_health",
+        "list_server_tickets"
+      ]
+    },
+    "algotrading-db": {
+      "command": "/home/julian/gitRepositories/AlgoTrading/venv/bin/python3",
+      "args": [
+        "/home/julian/gitRepositories/AlgoTrading/mcp_server/server.py"
+      ],
+      "description": "AlgoTrading DB — acceso a PostgreSQL y MySQL"
+    }
+  }
+}

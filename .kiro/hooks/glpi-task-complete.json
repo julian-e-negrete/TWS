@@ -1,0 +1,12 @@
+{
+  "name": "GLPI Task Complete",
+  "version": "2.0.0",
+  "description": "After task is done, close the GLPI ticket with a solution summary",
+  "when": {
+    "type": "postTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "MANDATORY: The task is complete. Close the GLPI ticket opened at the start:\n\n1. POST http://100.112.16.115:8080/api/v2.2/token with body: {grant_type:'password', client_id:'5880211c5e72134f1ae47dda08377e4b503bd3d15f93d858dda5ab82a4a000e0', client_secret:'b6d8fbdc08f6443abce916dae0d5184f56793a50782130e3c6fa6153692d165c', username:'AlgoTrade Server', password:'45237348', scope:'api user'} → get access_token\n\n2. PATCH http://100.112.16.115:8080/api/v2.2/Assistance/Ticket/<id> with Authorization: Bearer <token> and body: {status:5} — closes the ticket\n\nThe solution description must summarize what was implemented and which files/commits were affected."
+  }
+}
