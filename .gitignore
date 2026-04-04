@@ -3,3 +3,4 @@
 .kiro/agents
 **/__pycache__/
 docs/
+**/__init__.py
