@@ -1,6 +1,7 @@
 mod ui;
 mod data;
 mod network;
+mod db;
 
 use anyhow::Result;
 use crossterm::{
@@ -20,6 +21,13 @@ use network::websocket::connect_websocket;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Load .env from the workspace root (two levels up from tws_terminal/)
+    let env_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join(".env");
+    let _ = dotenvy::from_path(env_path);
+
     // ── Terminal setup ───────────────────────────────────────────────────────
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -29,6 +37,9 @@ async fn main() -> Result<()> {
 
     // ── Channel: Redis/websocket → app ───────────────────────────────────────
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel();
+
+    // ── Channel: DB historical data → app ────────────────────────────────────
+    let (db_tx, mut db_rx) = mpsc::unbounded_channel::<ui::app::DbMessage>();
 
     // ── Spawn Redis subscriber on a separate Tokio task ──────────────────────
     let ws_handle = tokio::spawn(async move {
@@ -43,6 +54,7 @@ async fn main() -> Result<()> {
 
     // ── App state ─────────────────────────────────────────────────────────────
     let mut app = TradingApp::new();
+    app.db_tx = Some(db_tx);
 
     // ── Render ticker: redraw at ~30 fps regardless of events ─────────────────
     let mut render_interval = time::interval(time::Duration::from_millis(33));
@@ -58,6 +70,11 @@ async fn main() -> Result<()> {
             // Redis data message
             Some(msg) = ws_rx.recv() => {
                 app.handle_websocket_message(msg);
+            }
+
+            // DB historical data
+            Some(msg) = db_rx.recv() => {
+                app.handle_db_message(msg);
             }
 
             // Keyboard input
