@@ -191,3 +191,136 @@ pub async fn fetch_distinct_binance_symbols(client: &Client) -> Result<Vec<Strin
     ).await?;
     Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
 }
+
+// ─── Options chain & futures curve ───────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+pub struct OptionRow {
+    pub instrument: String,
+    pub last_price: f64,
+    pub bid: f64,
+    pub ask: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct FuturesRow {
+    pub instrument: String,
+    pub last_price: f64,
+    pub bid: f64,
+    pub ask: f64,
+}
+
+pub async fn fetch_options_chain(client: &Client) -> Result<Vec<OptionRow>> {
+    // Get distinct liquid option instruments (have live bid/ask in last 7 days)
+    let instruments = client.query(
+        "SELECT DISTINCT instrument FROM ticks
+         WHERE (instrument LIKE '%GFGC%' OR instrument LIKE '%GFGV%')
+           AND time > NOW() - INTERVAL '7 days'
+           AND bid_price > 0 AND ask_price > 0",
+        &[],
+    ).await?;
+
+    let mut rows = Vec::new();
+    for row in &instruments {
+        let tick_instr: &str = row.get(0);
+        // Strip M: prefix for orders table lookup (orders uses no M: prefix)
+        let order_instr = tick_instr.trim_start_matches("M:");
+
+        // Best bid/ask from LOB: MAX(bid) and MIN(ask) from the last session with data
+        let tick = client.query_opt(
+            "SELECT COALESCE(MAX(bid_price), 0)::float8, COALESCE(MIN(ask_price), 0)::float8
+             FROM ticks WHERE instrument = $1
+               AND time::date = (
+                   SELECT MAX(time::date) FROM ticks
+                   WHERE instrument = $1 AND bid_price > 0 AND ask_price > 0
+               )
+               AND bid_price > 0 AND ask_price > 0",
+            &[&tick_instr],
+        ).await?;
+
+        // Latest executed trade price from orders
+        let order = client.query_opt(
+            "SELECT price::float8 FROM orders WHERE instrument = $1
+             ORDER BY time DESC LIMIT 1",
+            &[&order_instr],
+        ).await?;
+
+        if let Some(t) = tick {
+            let bid: f64 = t.get(0);
+            let ask: f64 = t.get(1);
+            if bid > 0.0 && ask > 0.0 {
+                rows.push(OptionRow {
+                    instrument: tick_instr.to_string(),
+                    last_price:  order.as_ref().map(|r| r.get::<_, f64>(0)).unwrap_or(0.0),
+                    bid,
+                    ask,
+                });
+            }
+        }
+    }
+    Ok(rows)
+}
+
+/// Fetch the most recent executed trade price for a given instrument
+pub async fn fetch_last_price(client: &Client, instrument: &str) -> Result<f64> {
+    // Try orders table first (actual trades), fall back to ticks last_price
+    let order_instr = instrument.trim_start_matches("M:");
+    let rows = client.query(
+        "SELECT price::float8 FROM orders WHERE instrument = $1
+         ORDER BY time DESC LIMIT 1",
+        &[&order_instr],
+    ).await?;
+    if let Some(r) = rows.first() {
+        return Ok(r.get(0));
+    }
+    // Fallback: ticks last_price
+    let rows = client.query(
+        "SELECT last_price::float8 FROM ticks WHERE instrument = $1
+         ORDER BY time DESC LIMIT 1",
+        &[&instrument],
+    ).await?;
+    Ok(rows.first().map(|r| r.get::<_, f64>(0)).unwrap_or(0.0))
+}
+
+pub async fn fetch_futures_curve(client: &Client) -> Result<Vec<FuturesRow>> {
+    // Get the 3 contracts with the most recent tick data
+    let rows = client.query(
+        "SELECT instrument,
+                last_price::float8, bid_price::float8, ask_price::float8
+         FROM (
+             SELECT DISTINCT ON (instrument) instrument,
+                    last_price, bid_price, ask_price, time
+             FROM ticks
+             WHERE instrument LIKE '%DDF_DLR%'
+               AND time > NOW() - INTERVAL '90 days'
+             ORDER BY instrument, time DESC
+         ) sub
+         ORDER BY time DESC
+         LIMIT 3",
+        &[],
+    ).await?;
+    Ok(rows.iter().map(|r| FuturesRow {
+        instrument: r.get(0),
+        last_price:  r.get(1),
+        bid:         r.get(2),
+        ask:         r.get(3),
+    }).collect())
+}
+
+pub async fn fetch_futures_ticks(client: &Client, instrument: &str, limit: i64) -> Result<Vec<HistTick>> {
+    let rows = client.query(
+        "SELECT time, instrument,
+                bid_price::float8, ask_price::float8, last_price::float8, total_volume
+         FROM ticks WHERE instrument = $1
+         ORDER BY time DESC LIMIT $2",
+        &[&instrument, &limit],
+    ).await?;
+    Ok(rows.iter().map(|r| HistTick {
+        time:         r.get(0),
+        instrument:   r.get(1),
+        bid_price:    r.get(2),
+        ask_price:    r.get(3),
+        last_price:   r.get(4),
+        total_volume: r.get(5),
+    }).collect())
+}
