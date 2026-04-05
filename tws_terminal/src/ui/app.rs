@@ -137,6 +137,7 @@ pub struct NewsItem {
     pub time:     String,
     pub source:   String,
     pub headline: String,
+    pub url:      String,
 }
 
 // ─── DB messages ──────────────────────────────────────────────────────────
@@ -622,7 +623,7 @@ impl TradingApp {
         tokio::spawn(async move {
             let mut items: Vec<NewsItem> = Vec::new();
 
-            // ByMA
+            // ByMA relevant facts
             let byma_result = async {
                 use chrono::{Duration, Utc};
                 let now = Utc::now();
@@ -634,7 +635,10 @@ impl TradingApp {
                     "publishDateTo": to,
                     "texto": ""
                 });
-                let resp = reqwest::Client::new()
+                let resp = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(10))
+                    .danger_accept_invalid_certs(true)  // ByMA has cert issues
+                    .build()?
                     .post("https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/bnown/relevant-facts")
                     .header("token", "dc826d4c2dde7519e882a250359a23a0")
                     .header("Content-Type", "application/json")
@@ -645,42 +649,95 @@ impl TradingApp {
             }.await;
 
             if let Ok(json) = byma_result {
-                if let Some(arr) = json.as_array() {
+                let arr = json["data"].as_array()
+                    .or_else(|| json.as_array());
+                if let Some(arr) = arr {
                     for item in arr.iter().take(20) {
+                        let time = item["fecha"].as_str()
+                            .or_else(|| item["publishDate"].as_str())
+                            .unwrap_or("").chars().take(16).collect();
+                        let issuer = item["emisor"].as_str()
+                            .or_else(|| item["issuerName"].as_str())
+                            .unwrap_or("");
+                        let desc = item["referencia"].as_str()
+                            .or_else(|| item["description"].as_str())
+                            .unwrap_or("").chars().take(80).collect::<String>();
+                        // ByMA download link — open the public ByMA relevant facts search page
+                        // (direct PDF download requires authenticated session, not possible from browser)
+                        let issuer_encoded = item["emisor"].as_str().unwrap_or("")
+                            .replace(' ', "+");
+                        let url = if !issuer_encoded.is_empty() {
+                            format!("https://open.bymadata.com.ar/#/hechos-relevantes?emisor={}", issuer_encoded)
+                        } else {
+                            "https://open.bymadata.com.ar/#/hechos-relevantes".to_string()
+                        };
                         items.push(NewsItem {
-                            time:     item["publishDate"].as_str().unwrap_or("").chars().take(16).collect(),
+                            time,
                             source:   "ByMA".to_string(),
-                            headline: format!("{} — {}",
-                                item["issuerName"].as_str().unwrap_or(""),
-                                item["description"].as_str().unwrap_or("").chars().take(80).collect::<String>()),
+                            headline: format!("{} — {}", issuer, desc),
+                            url,
                         });
                     }
                 }
             }
 
-            // Reuters via NewsAPI (free plan: use /everything endpoint)
+            // NewsAPI
             if !newsapi_key.is_empty() {
                 let url = format!(
                     "https://newsapi.org/v2/everything?q=finance+markets+economy&language=en&sortBy=publishedAt&pageSize=20&apiKey={}",
                     newsapi_key
                 );
-                if let Ok(resp) = reqwest::get(&url).await {
-                    if let Ok(json) = resp.json::<serde_json::Value>().await {
-                        if let Some(articles) = json["articles"].as_array() {
-                            for a in articles {
-                                let source = a["source"]["name"].as_str().unwrap_or("News");
-                                items.push(NewsItem {
-                                    time:     a["publishedAt"].as_str().unwrap_or("").chars().take(16).collect(),
-                                    source:   source.to_string(),
-                                    headline: a["title"].as_str().unwrap_or("").chars().take(100).collect(),
-                                });
+                let result = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(10))
+                    .user_agent("TWS-Terminal/1.0")
+                    .build()
+                    .ok()
+                    .map(|c| c.get(&url).send());
+                if let Some(fut) = result {
+                    if let Ok(resp) = fut.await {
+                        if let Ok(json) = resp.json::<serde_json::Value>().await {
+                            if let Some(articles) = json["articles"].as_array() {
+                                for a in articles {
+                                    let source = a["source"]["name"].as_str().unwrap_or("News");
+                                    items.push(NewsItem {
+                                        time:     a["publishedAt"].as_str().unwrap_or("").chars().take(16).collect(),
+                                        source:   source.to_string(),
+                                        headline: a["title"].as_str().unwrap_or("").chars().take(100).collect(),
+                                        url:      a["url"].as_str().unwrap_or("").to_string(),
+                                    });
+                                }
                             }
                         }
                     }
                 }
             }
 
-            // Sort by time desc
+            // Yahoo Finance RSS — GGAL + MERVAL news
+            let yf_url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GGAL,^MERV,YPF,SUPV&region=US&lang=en-US";
+            if let Ok(resp) = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .user_agent("Mozilla/5.0")
+                .build().unwrap()
+                .get(yf_url).send().await
+            {
+                if let Ok(xml) = resp.text().await {
+                    // Simple RSS item parser — extract <item> blocks
+                    for chunk in xml.split("<item>").skip(1) {
+                        let title = extract_xml_tag(chunk, "title");
+                        let link  = extract_xml_tag(chunk, "link");
+                        let date  = extract_xml_tag(chunk, "pubDate");
+                        if !title.is_empty() {
+                            items.push(NewsItem {
+                                time:     date.chars().take(16).collect(),
+                                source:   "Yahoo Finance".to_string(),
+                                headline: title.chars().take(100).collect(),
+                                url:      link,
+                            });
+                        }
+                    }
+                }
+            }
+
             items.sort_by(|a, b| b.time.cmp(&a.time));
             let _ = tx.send(DbMessage::News(items));
         });
@@ -889,6 +946,17 @@ impl TradingApp {
                     if self.active_tab == ExchangeTab::Options {
                         self.options_loading = false;
                         self.trigger_options_fetch();
+                    } else if self.active_tab == ExchangeTab::News {
+                        if let Some(idx) = self.news_state.selected() {
+                            if let Some(item) = self.news_items.get(idx) {
+                                if !item.url.is_empty() {
+                                    let url = item.url.clone();
+                                    tokio::spawn(async move {
+                                        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -2107,16 +2175,30 @@ impl TradingApp {
             );
             return;
         }
+        if self.news_items.is_empty() {
+            frame.render_widget(
+                Paragraph::new("  No news loaded — press [r] to fetch")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .block(Block::default().borders(Borders::ALL).title(" News ")),
+                area,
+            );
+            return;
+        }
         let items: Vec<ListItem> = self.news_items.iter().map(|n| {
             let (badge, color) = if n.source == "ByMA" {
-                ("[ByMA]   ", Color::Cyan)
+                ("[ByMA]        ", Color::Cyan)
+            } else if n.source == "Yahoo Finance" {
+                ("[Yahoo Finance]", Color::Magenta)
             } else {
-                ("[Reuters]", Color::Yellow)
+                ("[News]        ", Color::Yellow)
             };
+            let has_url = !n.url.is_empty();
             ListItem::new(Line::from(vec![
                 Span::styled(badge, Style::default().fg(color).add_modifier(Modifier::BOLD)),
                 Span::styled(format!(" {} ", n.time), Style::default().fg(Color::DarkGray)),
                 Span::styled(n.headline.clone(), Style::default().fg(Color::White)),
+                if has_url { Span::styled(" [↵]", Style::default().fg(Color::DarkGray)) }
+                else       { Span::raw("") },
             ]))
         }).collect();
         let count = items.len();
@@ -2583,7 +2665,7 @@ impl TradingApp {
                 let hint = match self.active_tab {
                     ExchangeTab::Options => "[↑↓] underlying  [Enter] load chain  [c] calculator  [r] refresh  [Tab] next tab  [q] quit",
                     ExchangeTab::Futures => "[←→] contract  [↑↓] scroll ticks  [r] refresh  [Tab] next tab  [q] quit",
-                    ExchangeTab::News    => "[↑↓] scroll  [r] refresh  [Tab] next tab  [q] quit",
+                    ExchangeTab::News    => "[↑↓] scroll  [Enter] open in browser  [r] refresh  [Tab] next tab  [q] quit",
                     _ => match (self.active_tab, active_subtab) {
                         (ExchangeTab::Merval, SubTab::Historical) if self.merval_hist_tab == MervalHistTab::Favorites =>
                             "[↑↓] scroll  [←→] nav favorites  [a] add  [d] del  [p] panel  [f] filter  [s] real-time  [Tab] next tab  [q] quit",
@@ -2604,4 +2686,20 @@ impl TradingApp {
             .style(style);
         frame.render_widget(paragraph, area);
     }
+}
+
+fn extract_xml_tag(xml: &str, tag: &str) -> String {
+    let open  = format!("<{}>", tag);
+    let close = format!("</{}>", tag);
+    if let Some(start) = xml.find(&open) {
+        let content = &xml[start + open.len()..];
+        if let Some(end) = content.find(&close) {
+            return content[..end]
+                .trim_start_matches("<![CDATA[")
+                .trim_end_matches("]]>")
+                .trim()
+                .to_string();
+        }
+    }
+    String::new()
 }
