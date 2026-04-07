@@ -2,11 +2,14 @@ use anyhow::Result;
 use futures_util::StreamExt;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::network::{BinanceTick, BinanceTrade, WebSocketMessage};
+use crate::network::{BinanceTick, BinanceTrade, MatrizOrder, MatrizTick, UsFuturesTick, WebSocketMessage};
 
 const REDIS_URL: &str = "redis://100.112.16.115:6379";
 const CHANNEL_TICKS: &str = "binance:ticks";
 const CHANNEL_TRADES: &str = "binance:trades";
+const CHANNEL_US_FUTURES: &str = "us_futures:ticks";
+const CHANNEL_MATRIZ_TICKS: &str = "matriz:ticks";
+const CHANNEL_MATRIZ_ORDERS: &str = "matriz:orders";
 
 /// Entry point: connects to Redis and subscribes to both Binance channels.
 /// Retries indefinitely with a 5-second back-off on failure.
@@ -37,6 +40,9 @@ async fn try_connect(tx: UnboundedSender<WebSocketMessage>) -> Result<()> {
     let mut pubsub = conn.into_pubsub();
     pubsub.subscribe(CHANNEL_TICKS).await?;
     pubsub.subscribe(CHANNEL_TRADES).await?;
+    pubsub.subscribe(CHANNEL_US_FUTURES).await?;
+    pubsub.subscribe(CHANNEL_MATRIZ_TICKS).await?;
+    pubsub.subscribe(CHANNEL_MATRIZ_ORDERS).await?;
 
     let _ = tx.send(WebSocketMessage::Connected("binance".to_string()));
 
@@ -59,6 +65,21 @@ async fn try_connect(tx: UnboundedSender<WebSocketMessage>) -> Result<()> {
             c if c == CHANNEL_TRADES => {
                 if let Ok(trade) = serde_json::from_str::<BinanceTrade>(&payload) {
                     let _ = tx.send(WebSocketMessage::TradeUpdate(trade));
+                }
+            }
+            c if c == CHANNEL_US_FUTURES => {
+                if let Ok(tick) = serde_json::from_str::<UsFuturesTick>(&payload) {
+                    let _ = tx.send(WebSocketMessage::UsFuturesTick(tick));
+                }
+            }
+            c if c == CHANNEL_MATRIZ_TICKS => {
+                if let Ok(tick) = serde_json::from_str::<MatrizTick>(&payload) {
+                    let _ = tx.send(WebSocketMessage::MatrizTick(tick));
+                }
+            }
+            c if c == CHANNEL_MATRIZ_ORDERS => {
+                if let Ok(order) = serde_json::from_str::<MatrizOrder>(&payload) {
+                    let _ = tx.send(WebSocketMessage::MatrizOrder(order));
                 }
             }
             _ => {}

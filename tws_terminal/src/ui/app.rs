@@ -4,7 +4,8 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{BarChart, Block, Borders, List, ListItem, Paragraph, Sparkline, Table, TableState, Tabs},
+    widgets::{canvas::*, Axis, BarChart, Block, Borders, Chart, Dataset, GraphType, List, ListItem, Paragraph, Sparkline, Table, TableState, Tabs},
+    symbols,
     Frame,
 };
 
@@ -22,6 +23,8 @@ pub enum ExchangeTab {
     Options,
     Futures,
     News,
+    Markets,
+    UsFutures,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -42,6 +45,44 @@ impl SubTab {
 /// Sub-tabs inside MERVAL Historical view
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum MervalHistTab { Stocks, Options, Bonds, Favorites }
+
+/// Time range for MERVAL historical chart
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum MervalTimeRange { Min5, Min30, Hour1, Day1, Days7, Days30 }
+
+impl MervalTimeRange {
+    pub fn label(self) -> &'static str {
+        match self {
+            MervalTimeRange::Min5   => "5min",
+            MervalTimeRange::Min30  => "30min",
+            MervalTimeRange::Hour1  => "1h",
+            MervalTimeRange::Day1   => "1d",
+            MervalTimeRange::Days7  => "7d",
+            MervalTimeRange::Days30 => "30d",
+        }
+    }
+    pub fn next(self) -> Self {
+        match self {
+            MervalTimeRange::Min5   => MervalTimeRange::Min30,
+            MervalTimeRange::Min30  => MervalTimeRange::Hour1,
+            MervalTimeRange::Hour1  => MervalTimeRange::Day1,
+            MervalTimeRange::Day1   => MervalTimeRange::Days7,
+            MervalTimeRange::Days7  => MervalTimeRange::Days30,
+            MervalTimeRange::Days30 => MervalTimeRange::Min5,
+        }
+    }
+    /// (bucket_interval, lookback_interval) as SQL literal strings
+    pub fn sql_params(self) -> (&'static str, &'static str) {
+        match self {
+            MervalTimeRange::Min5   => ("1 minute",  "5 minutes"),
+            MervalTimeRange::Min30  => ("1 minute",  "30 minutes"),
+            MervalTimeRange::Hour1  => ("1 minute",  "1 hour"),
+            MervalTimeRange::Day1   => ("1 minute",  "1 day"),
+            MervalTimeRange::Days7  => ("30 minutes","7 days"),
+            MervalTimeRange::Days30 => ("2 hours",   "30 days"),
+        }
+    }
+}
 
 impl MervalHistTab {
     fn label(self) -> &'static str {
@@ -134,10 +175,11 @@ impl FilterState {
 
 #[derive(Clone, Debug)]
 pub struct NewsItem {
-    pub time:     String,
-    pub source:   String,
-    pub headline: String,
-    pub url:      String,
+    pub time:        String,
+    pub source:      String,
+    pub headline:    String,
+    pub url:         String,
+    pub description: String,
 }
 
 // ─── DB messages ──────────────────────────────────────────────────────────
@@ -154,7 +196,12 @@ pub enum DbMessage {
     GgalSpot(f64),
     FuturesCurve(Vec<FuturesRow>),
     FuturesTicks(Vec<HistTick>),
+    BinancePriceHistory(String, Vec<u64>),
+    MervalInstruments(Vec<String>),
+    MervalPriceSeries(Vec<(f64, f64)>, Vec<String>),  // (points, time_labels)
+    MervalInstrumentOrders(Vec<HistOrder>),
     News(Vec<NewsItem>),
+    UsFuturesOhlcv(Vec<crate::db::UsFuturesOhlcv>),
     Error(String),
 }
 
@@ -233,8 +280,16 @@ pub struct TradingApp {
     pub hist_binance_trades_state: TableState,
     pub hist_focus: HistFocus,
 
-    // ── MERVAL historical sub-tab ──
-    pub merval_hist_tab: MervalHistTab,
+    // ── MERVAL historical instrument browser ──
+    pub merval_hist_tab: MervalHistTab,  // kept for favorites panel compatibility
+    pub merval_instruments:       Vec<String>,
+    pub merval_inst_list_state:   ratatui::widgets::ListState,
+    pub merval_selected_instr:    Option<String>,
+    pub merval_time_range:        MervalTimeRange,
+    pub merval_price_series:      Vec<(f64, f64)>,
+    pub merval_price_labels:      Vec<String>,
+    pub merval_detail_orders:     Vec<HistOrder>,
+    pub merval_detail_orders_state: TableState,
 
     // ── Favorites ──
     pub favorites: Vec<String>,
@@ -246,6 +301,9 @@ pub struct TradingApp {
 
     // ── DB channel sender (set by main) ──
     pub db_tx: Option<UnboundedSender<DbMessage>>,
+
+    // ── Symbols whose price history has been seeded from DB ──
+    pub seeded_symbols: std::collections::HashSet<String>,
 
     // ── Historical filter ──
     pub filter: FilterState,
@@ -279,7 +337,11 @@ pub struct TradingApp {
     pub futures_ticks:       Vec<HistTick>,
     pub futures_ticks_state: TableState,
 
-    // ── News tab ──
+    // ── US Futures tab ──
+    pub us_futures_live:    std::collections::HashMap<String, (f64, f64)>, // symbol → (price, prev_price)
+    pub us_futures_selected: usize,
+    pub us_futures_ohlcv:   Vec<crate::db::UsFuturesOhlcv>,
+    pub us_futures_symbols: Vec<&'static str>,
     pub news_items:   Vec<NewsItem>,
     pub news_state:   ratatui::widgets::ListState,
     pub news_loading: bool,
@@ -315,6 +377,14 @@ impl TradingApp {
             hist_binance_trades_state: TableState::default(),
             hist_focus: HistFocus::Top,
             merval_hist_tab: MervalHistTab::Stocks,
+            merval_instruments:         Vec::new(),
+            merval_inst_list_state:     ratatui::widgets::ListState::default(),
+            merval_selected_instr:      None,
+            merval_time_range:          MervalTimeRange::Day1,
+            merval_price_series:        Vec::new(),
+            merval_price_labels:        Vec::new(),
+            merval_detail_orders:       Vec::new(),
+            merval_detail_orders_state: TableState::default(),
             favorites: Vec::new(),
             fav_selected: 0,
             fav_input: String::new(),
@@ -322,6 +392,7 @@ impl TradingApp {
             fav_orders_state: TableState::default(),
             fav_focus: HistFocus::Top,
             db_tx: None,
+            seeded_symbols: std::collections::HashSet::new(),
             filter: FilterState::new(),
             available_instruments:     Vec::new(),
             available_dates:           Vec::new(),
@@ -347,6 +418,10 @@ impl TradingApp {
             news_items:   Vec::new(),
             news_state:   ratatui::widgets::ListState::default(),
             news_loading: false,
+            us_futures_live:     std::collections::HashMap::new(),
+            us_futures_selected: 0,
+            us_futures_ohlcv:    Vec::new(),
+            us_futures_symbols:  vec!["ES=F","NQ=F","YM=F","CL=F","GC=F","SI=F","ZB=F"],
         }
     }
 
@@ -421,13 +496,14 @@ impl TradingApp {
             }
             (ExchangeTab::Futures, _) => (&mut self.futures_ticks_state, self.hist_ticks.len()),
             (ExchangeTab::News,    _) => {
-                // News uses ListState — scroll separately
                 let len = self.news_items.len();
                 if len == 0 { return; }
                 let cur = self.news_state.selected().unwrap_or(0) as i64;
                 self.news_state.select(Some((cur + delta).clamp(0, len as i64 - 1) as usize));
                 return;
             }
+            (ExchangeTab::Markets,   _) => { return; }
+            (ExchangeTab::UsFutures, _) => { return; }
         };
         if len == 0 { return; }
         let cur = state.selected().unwrap_or(0) as i64;
@@ -560,6 +636,50 @@ impl TradingApp {
 
     // ─── Fetch triggers ──────────────────────────────────────────────────
 
+    fn trigger_merval_instruments_fetch(&mut self) {
+        let Some(tx) = self.db_tx.clone() else { return };
+        tokio::spawn(async move {
+            if let Ok(client) = crate::db::connect().await {
+                if let Ok(list) = crate::db::fetch_distinct_merval_instruments(&client, 90).await {
+                    let _ = tx.send(DbMessage::MervalInstruments(list));
+                }
+            }
+        });
+    }
+
+    fn trigger_merval_price_series(&mut self, instrument: &str) {
+        let Some(tx) = self.db_tx.clone() else { return };
+        let instr = instrument.to_string();
+        let range = self.merval_time_range;
+        self.merval_selected_instr = Some(instr.clone());
+        self.merval_price_series.clear();
+        self.merval_price_labels.clear();
+        self.merval_detail_orders.clear();
+        tokio::spawn(async move {
+            let (c1, c2) = tokio::join!(crate::db::connect(), crate::db::connect());
+            match (c1, c2) {
+                (Ok(client1), Ok(client2)) => {
+                    let instr2 = instr.clone();
+                    let (series_result, orders_result) = tokio::join!(
+                        crate::db::fetch_instrument_price_series_with_times(&client1, &instr, range.sql_params()),
+                        crate::db::fetch_instrument_orders(&client2, &instr2)
+                    );
+                    match series_result {
+                        Ok((series, labels)) => { let _ = tx.send(DbMessage::MervalPriceSeries(series, labels)); }
+                        Err(e) => { let _ = tx.send(DbMessage::Error(format!("price series: {e:#}"))); }
+                    }
+                    match orders_result {
+                        Ok(orders) => { let _ = tx.send(DbMessage::MervalInstrumentOrders(orders)); }
+                        Err(e) => { let _ = tx.send(DbMessage::Error(format!("orders: {e}"))); }
+                    }
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    let _ = tx.send(DbMessage::Error(format!("DB connect: {e}")));
+                }
+            }
+        });
+    }
+
     fn trigger_options_fetch(&mut self) {
         let Some(tx) = self.db_tx.clone() else { return };
         if self.options_loading { return; }
@@ -673,9 +793,10 @@ impl TradingApp {
                         };
                         items.push(NewsItem {
                             time,
-                            source:   "ByMA".to_string(),
-                            headline: format!("{} — {}", issuer, desc),
+                            source:      "ByMA".to_string(),
+                            headline:    format!("{} — {}", issuer, desc),
                             url,
+                            description: String::new(), // ByMA has no body text
                         });
                     }
                 }
@@ -700,10 +821,11 @@ impl TradingApp {
                                 for a in articles {
                                     let source = a["source"]["name"].as_str().unwrap_or("News");
                                     items.push(NewsItem {
-                                        time:     a["publishedAt"].as_str().unwrap_or("").chars().take(16).collect(),
-                                        source:   source.to_string(),
-                                        headline: a["title"].as_str().unwrap_or("").chars().take(100).collect(),
-                                        url:      a["url"].as_str().unwrap_or("").to_string(),
+                                        time:        a["publishedAt"].as_str().unwrap_or("").chars().take(16).collect(),
+                                        source:      source.to_string(),
+                                        headline:    a["title"].as_str().unwrap_or("").chars().take(100).collect(),
+                                        url:         a["url"].as_str().unwrap_or("").to_string(),
+                                        description: a["description"].as_str().unwrap_or("").chars().take(400).collect(),
                                     });
                                 }
                             }
@@ -712,31 +834,57 @@ impl TradingApp {
                 }
             }
 
-            // Yahoo Finance RSS — GGAL + MERVAL news
-            let yf_url = "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GGAL,^MERV,YPF,SUPV&region=US&lang=en-US";
-            if let Ok(resp) = reqwest::Client::builder()
+            // Yahoo Finance RSS — 3 feeds in parallel
+            let yf_client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .user_agent("Mozilla/5.0")
-                .build().unwrap()
-                .get(yf_url).send().await
-            {
-                if let Ok(xml) = resp.text().await {
-                    // Simple RSS item parser — extract <item> blocks
-                    for chunk in xml.split("<item>").skip(1) {
-                        let title = extract_xml_tag(chunk, "title");
-                        let link  = extract_xml_tag(chunk, "link");
-                        let date  = extract_xml_tag(chunk, "pubDate");
-                        if !title.is_empty() {
-                            items.push(NewsItem {
-                                time:     date.chars().take(16).collect(),
-                                source:   "Yahoo Finance".to_string(),
-                                headline: title.chars().take(100).collect(),
-                                url:      link,
-                            });
+                .build().unwrap();
+
+            let feeds: &[(&str, &str)] = &[
+                ("https://feeds.finance.yahoo.com/rss/2.0/headline?s=%5EGSPC,%5EIXIC,%5EDJI&region=US&lang=en-US",
+                 "Yahoo Global"),
+                ("https://feeds.finance.yahoo.com/rss/2.0/headline?s=GGAL,YPF,SUPV,PAMP,BBAR&region=US&lang=en-US",
+                 "Yahoo Argentina"),
+                ("https://feeds.finance.yahoo.com/rss/2.0/headline?s=GGAL,YPF,SUPV,PAMP,BBAR,^MERV&region=US&lang=en-US",
+                 "Yahoo Stocks"),
+            ];
+
+            let futures_vec: Vec<_> = feeds.iter().map(|(url, label)| {
+                let client = yf_client.clone();
+                let url = url.to_string();
+                let label = label.to_string();
+                async move {
+                    let mut feed_items = Vec::new();
+                    if let Ok(resp) = client.get(&url).send().await {
+                        if let Ok(xml) = resp.text().await {
+                            for chunk in xml.split("<item>").skip(1) {
+                                let title = extract_xml_tag(chunk, "title");
+                                let link  = extract_xml_tag(chunk, "link");
+                                let date  = extract_xml_tag(chunk, "pubDate");
+                                if !title.is_empty() {
+                                    feed_items.push(NewsItem {
+                                        time:        date.chars().take(25).collect(),
+                                        source:      label.clone(),
+                                        headline:    title.chars().take(100).collect(),
+                                        url:         link,
+                                        description: extract_xml_tag(chunk, "description").chars().take(400).collect(),
+                                    });
+                                }
+                            }
                         }
                     }
+                    feed_items
                 }
+            }).collect();
+
+            let yf_results = futures_util::future::join_all(futures_vec).await;
+            for feed_items in yf_results {
+                items.extend(feed_items);
             }
+
+            // Deduplicate by headline
+            let mut seen = std::collections::HashSet::new();
+            items.retain(|n| seen.insert(n.headline.clone()));
 
             items.sort_by(|a, b| b.time.cmp(&a.time));
             let _ = tx.send(DbMessage::News(items));
@@ -766,14 +914,33 @@ impl TradingApp {
                 }
             }
             DbMessage::FuturesTicks(rows)   => { self.futures_ticks = rows; self.futures_ticks_state = TableState::default(); }
+            DbMessage::BinancePriceHistory(symbol, points) => {
+                if let Some(data) = self.symbol_map.get_mut(&symbol) {
+                    data.seed_history(points);
+                }
+            }
+            DbMessage::MervalInstruments(list) => {
+                self.merval_instruments = list;
+                if self.merval_inst_list_state.selected().is_none() && !self.merval_instruments.is_empty() {
+                    self.merval_inst_list_state.select(Some(0));
+                }
+            }
+            DbMessage::MervalPriceSeries(series, labels) => {
+                self.merval_price_series = series;
+                self.merval_price_labels = labels;
+            }
+            DbMessage::MervalInstrumentOrders(orders) => {
+                self.merval_detail_orders = orders;
+                self.merval_detail_orders_state = TableState::default();
+            }
             DbMessage::News(items)          => { self.news_items = items; self.news_loading = false; }
+            DbMessage::UsFuturesOhlcv(rows) => { self.us_futures_ohlcv = rows; }
             DbMessage::Error(e)             => self.hist_error = Some(e),
         }
     }
 
     /// Spawn a background task that queries all 4 tables and sends results back.
-    fn trigger_historical_fetch(&mut self) {
-        let Some(tx) = self.db_tx.clone() else { return };
+    fn trigger_historical_fetch(&mut self) {        let Some(tx) = self.db_tx.clone() else { return };
         if self.hist_loading { return; }
         self.hist_loading = true;
         self.hist_error = None;
@@ -817,11 +984,27 @@ impl TradingApp {
     pub fn handle_websocket_message(&mut self, msg: WebSocketMessage) {
         match msg {
             WebSocketMessage::TickUpdate(tick) => {
+                let is_new = !self.symbol_map.contains_key(&tick.symbol);
                 let data = self
                     .symbol_map
                     .entry(tick.symbol.clone())
                     .or_insert_with(|| BinanceSymbolData::new(&tick.symbol));
                 data.update(tick.open, tick.high, tick.low, tick.close, tick.volume);
+
+                // Seed historical price data on first tick for this symbol
+                if is_new && !self.seeded_symbols.contains(&tick.symbol) {
+                    self.seeded_symbols.insert(tick.symbol.clone());
+                    if let Some(tx) = self.db_tx.clone() {
+                        let symbol = tick.symbol.clone();
+                        tokio::spawn(async move {
+                            if let Ok(client) = crate::db::connect().await {
+                                if let Ok(points) = crate::db::fetch_binance_price_history(&client, &symbol, 3).await {
+                                    let _ = tx.send(DbMessage::BinancePriceHistory(symbol, points));
+                                }
+                            }
+                        });
+                    }
+                }
 
                 // Re-sort by USD-equivalent volume (close × volume)
                 let mut pairs: Vec<(String, f64)> = self
@@ -873,6 +1056,23 @@ impl TradingApp {
                     self.merval_data.update_price(price, volume);
                 }
             }
+            WebSocketMessage::UsFuturesTick(tick) => {
+                let entry = self.us_futures_live.entry(tick.symbol.clone()).or_insert((0.0, 0.0));
+                entry.1 = entry.0;
+                entry.0 = tick.last_price;
+            }
+            WebSocketMessage::MatrizTick(tick) => {
+                // Update MERVAL live data for the matching instrument
+                if tick.last_price > 0.0 {
+                    self.merval_data.update_price(tick.last_price, 0.0);
+                }
+            }
+            WebSocketMessage::MatrizOrder(order) => {
+                // Push to live orders panel
+                let side = if order.side == "B" { "BUY".to_string() } else { "SELL".to_string() };
+                self.orders.push(Order::new(side, order.price, order.volume as u32, order.instrument));
+                if self.orders.len() > 500 { self.orders.remove(0); }
+            }
             WebSocketMessage::OrderUpdate(order) => {
                 self.orders.push(order);
             }
@@ -911,15 +1111,27 @@ impl TradingApp {
                             self.merval_subtab = self.merval_subtab.toggle();
                             if self.merval_subtab == SubTab::Historical {
                                 self.trigger_historical_fetch();
+                                if self.merval_instruments.is_empty() {
+                                    self.trigger_merval_instruments_fetch();
+                                }
                             }
                         }
                         _ => {}
                     }
                 }
 
+                // [t] cycle time range on MERVAL Historical
+                crossterm::event::KeyCode::Char('t') => {
+                    if self.active_tab == ExchangeTab::Merval && self.merval_subtab == SubTab::Historical {
+                        self.merval_time_range = self.merval_time_range.next();
+                        if let Some(instr) = self.merval_selected_instr.clone() {
+                            self.trigger_merval_price_series(&instr);
+                        }
+                    }
+                }
+
                 // [r] refresh on Options/Futures/News tabs
-                crossterm::event::KeyCode::Char('r') => {
-                    match self.active_tab {
+                crossterm::event::KeyCode::Char('r') => {                    match self.active_tab {
                         ExchangeTab::Options => { self.options_loading = false; self.trigger_options_fetch(); }
                         ExchangeTab::Futures => self.trigger_futures_fetch(),
                         ExchangeTab::News    => { self.news_loading = false; self.trigger_news_fetch(); }
@@ -946,6 +1158,12 @@ impl TradingApp {
                     if self.active_tab == ExchangeTab::Options {
                         self.options_loading = false;
                         self.trigger_options_fetch();
+                    } else if self.active_tab == ExchangeTab::Merval && self.merval_subtab == SubTab::Historical {
+                        if let Some(idx) = self.merval_inst_list_state.selected() {
+                            if let Some(instr) = self.merval_instruments.get(idx).cloned() {
+                                self.trigger_merval_price_series(&instr);
+                            }
+                        }
                     } else if self.active_tab == ExchangeTab::News {
                         if let Some(idx) = self.news_state.selected() {
                             if let Some(item) = self.news_items.get(idx) {
@@ -992,8 +1210,17 @@ impl TradingApp {
                     }
                 }
                 crossterm::event::KeyCode::Char('5') => {
-                    self.active_tab = ExchangeTab::News;
-                    if self.news_items.is_empty() { self.trigger_news_fetch(); }
+                    if self.active_tab != ExchangeTab::Merval || self.merval_subtab != SubTab::Historical {
+                        self.active_tab = ExchangeTab::News;
+                        if self.news_items.is_empty() { self.trigger_news_fetch(); }
+                    }
+                }
+                crossterm::event::KeyCode::Char('6') => {
+                    self.active_tab = ExchangeTab::Markets;
+                }
+                crossterm::event::KeyCode::Char('7') => {
+                    self.active_tab = ExchangeTab::UsFutures;
+                    self.trigger_us_futures_ohlcv();
                 }
 
                 crossterm::event::KeyCode::Right | crossterm::event::KeyCode::Tab => {
@@ -1015,13 +1242,21 @@ impl TradingApp {
                             let instr = self.futures_curve[self.futures_selected].instrument.clone();
                             self.fetch_futures_ticks_for(&instr);
                         }
+                    } else if self.active_tab == ExchangeTab::UsFutures {
+                        if self.us_futures_selected + 1 < self.us_futures_symbols.len() {
+                            self.us_futures_selected += 1;
+                            self.us_futures_ohlcv.clear();
+                            self.trigger_us_futures_ohlcv();
+                        }
                     } else {
                         self.active_tab = match self.active_tab {
-                            ExchangeTab::Binance  => ExchangeTab::Merval,
-                            ExchangeTab::Merval   => ExchangeTab::Options,
-                            ExchangeTab::Options  => ExchangeTab::Futures,
-                            ExchangeTab::Futures  => ExchangeTab::News,
-                            ExchangeTab::News     => ExchangeTab::Binance,
+                            ExchangeTab::Binance   => ExchangeTab::Merval,
+                            ExchangeTab::Merval    => ExchangeTab::Options,
+                            ExchangeTab::Options   => ExchangeTab::Futures,
+                            ExchangeTab::Futures   => ExchangeTab::News,
+                            ExchangeTab::News      => ExchangeTab::Markets,
+                            ExchangeTab::Markets   => ExchangeTab::UsFutures,
+                            ExchangeTab::UsFutures => ExchangeTab::Binance,
                         };
                         self.on_tab_switch();
                     }
@@ -1040,13 +1275,19 @@ impl TradingApp {
                         self.futures_ticks_state = TableState::default();
                         let instr = self.futures_curve[self.futures_selected].instrument.clone();
                         self.fetch_futures_ticks_for(&instr);
+                    } else if self.active_tab == ExchangeTab::UsFutures && self.us_futures_selected > 0 {
+                        self.us_futures_selected -= 1;
+                        self.us_futures_ohlcv.clear();
+                        self.trigger_us_futures_ohlcv();
                     } else {
                         self.active_tab = match self.active_tab {
-                            ExchangeTab::Binance  => ExchangeTab::News,
-                            ExchangeTab::Merval   => ExchangeTab::Binance,
-                            ExchangeTab::Options  => ExchangeTab::Merval,
-                            ExchangeTab::Futures  => ExchangeTab::Options,
-                            ExchangeTab::News     => ExchangeTab::Futures,
+                            ExchangeTab::Binance   => ExchangeTab::UsFutures,
+                            ExchangeTab::Merval    => ExchangeTab::Binance,
+                            ExchangeTab::Options   => ExchangeTab::Merval,
+                            ExchangeTab::Futures   => ExchangeTab::Options,
+                            ExchangeTab::News      => ExchangeTab::Futures,
+                            ExchangeTab::Markets   => ExchangeTab::News,
+                            ExchangeTab::UsFutures => ExchangeTab::Markets,
                         };
                         self.on_tab_switch();
                     }
@@ -1068,7 +1309,15 @@ impl TradingApp {
                                 _ => SubTab::RealTime,
                             };
                             if subtab == SubTab::Historical {
-                                self.hist_scroll(-1);
+                                if self.active_tab == ExchangeTab::Merval {
+                                    // Navigate instrument list
+                                    let cur = self.merval_inst_list_state.selected().unwrap_or(0);
+                                    if cur > 0 {
+                                        self.merval_inst_list_state.select(Some(cur - 1));
+                                    }
+                                } else {
+                                    self.hist_scroll(-1);
+                                }
                             } else {
                                 match self.active_tab {
                                     ExchangeTab::Binance => {
@@ -1108,7 +1357,14 @@ impl TradingApp {
                                 _ => SubTab::RealTime,
                             };
                             if subtab == SubTab::Historical {
-                                self.hist_scroll(1);
+                                if self.active_tab == ExchangeTab::Merval {
+                                    let cur = self.merval_inst_list_state.selected().unwrap_or(0);
+                                    if cur + 1 < self.merval_instruments.len() {
+                                        self.merval_inst_list_state.select(Some(cur + 1));
+                                    }
+                                } else {
+                                    self.hist_scroll(1);
+                                }
                             } else {
                                 match self.active_tab {
                                     ExchangeTab::Binance => {
@@ -1348,11 +1604,24 @@ impl TradingApp {
 
     fn on_tab_switch(&mut self) {
         match self.active_tab {
-            ExchangeTab::Options => { if self.options_chain.is_empty() { self.trigger_options_fetch(); } }
-            ExchangeTab::Futures => { if self.futures_curve.is_empty() { self.trigger_futures_fetch(); } }
-            ExchangeTab::News    => { if self.news_items.is_empty() { self.trigger_news_fetch(); } }
+            ExchangeTab::Options   => { if self.options_chain.is_empty() { self.trigger_options_fetch(); } }
+            ExchangeTab::Futures   => { if self.futures_curve.is_empty() { self.trigger_futures_fetch(); } }
+            ExchangeTab::News      => { if self.news_items.is_empty() { self.trigger_news_fetch(); } }
+            ExchangeTab::UsFutures => { self.trigger_us_futures_ohlcv(); }
             _ => {}
         }
+    }
+
+    fn trigger_us_futures_ohlcv(&self) {
+        let Some(tx) = self.db_tx.clone() else { return };
+        let sym = self.us_futures_symbols[self.us_futures_selected].to_string();
+        tokio::spawn(async move {
+            if let Ok(client) = crate::db::connect().await {
+                if let Ok(rows) = crate::db::fetch_us_futures_ohlcv(&client, &sym, 200).await {
+                    let _ = tx.send(DbMessage::UsFuturesOhlcv(rows));
+                }
+            }
+        });
     }
 
     // ─── Top-level render ───────────────────────────────────────────────
@@ -1367,16 +1636,18 @@ impl TradingApp {
             && active_subtab == SubTab::Historical;
 
         // New tabs use a simple 3-chunk layout (tabs + main + controls)
-        if matches!(self.active_tab, ExchangeTab::Options | ExchangeTab::Futures | ExchangeTab::News) {
+        if matches!(self.active_tab, ExchangeTab::Options | ExchangeTab::Futures | ExchangeTab::News | ExchangeTab::Markets | ExchangeTab::UsFutures) {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(3)])
                 .split(frame.size());
             self.render_tabs(chunks[0], frame);
             match self.active_tab {
-                ExchangeTab::Options => self.render_options_tab(chunks[1], frame),
-                ExchangeTab::Futures => self.render_futures_tab(chunks[1], frame),
-                ExchangeTab::News    => self.render_news_tab(chunks[1], frame),
+                ExchangeTab::Options   => self.render_options_tab(chunks[1], frame),
+                ExchangeTab::Futures   => self.render_futures_tab(chunks[1], frame),
+                ExchangeTab::News      => self.render_news_tab(chunks[1], frame),
+                ExchangeTab::Markets   => self.render_markets_tab(chunks[1], frame),
+                ExchangeTab::UsFutures => self.render_us_futures_tab(chunks[1], frame),
                 _ => {}
             }
             self.render_input_area(chunks[2], frame);
@@ -1647,43 +1918,134 @@ impl TradingApp {
     // ─── MERVAL Historical dispatcher ────────────────────────────────────
 
     fn render_merval_historical(&mut self, top: Rect, bottom: Rect, frame: &mut Frame) {
-        if self.hist_loading {
-            let p = Paragraph::new("  Loading from PostgreSQL…")
-                .block(Block::default().borders(Borders::ALL).title(" MERVAL — Historical "));
-            frame.render_widget(p, top);
-            return;
-        }
-        if let Some(ref e) = self.hist_error.clone() {
-            let p = Paragraph::new(format!("  Error: {e}"))
-                .style(Style::default().fg(Color::Red))
-                .block(Block::default().borders(Borders::ALL).title(" Error "));
-            frame.render_widget(p, top);
-            return;
-        }
-
-        // Category tab bar at top of the top panel
-        let (tab_area, content_area) = {
-            let v = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Min(0)])
-                .split(top);
-            (v[0], v[1])
+        // Don't block on hist_loading — instrument list and chart have their own state
+        // Combine top+bottom into one full rect for the right panel
+        let full = Rect {
+            x: top.x,
+            y: top.y,
+            width: top.width,
+            height: top.height + bottom.height,
         };
-        self.render_merval_hist_tabs(tab_area, frame);
 
-        match self.merval_hist_tab {
-            MervalHistTab::Favorites => self.render_favorites_view(content_area, bottom, frame),
-            cat => {
-                // Filter ticks and orders by category
-                let ticks: Vec<HistTick> = self.hist_ticks.iter()
-                    .filter(|r| cat.matches(&r.instrument))
-                    .cloned().collect();
-                let orders: Vec<HistOrder> = self.hist_orders.iter()
-                    .filter(|r| cat.matches(&r.instrument))
-                    .cloned().collect();
-                self.render_category_ticks(content_area, frame, &ticks, cat);
-                self.render_category_orders(bottom, frame, &orders, cat);
+        // Left: instrument list | Right: full height
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(28), Constraint::Min(0)])
+            .split(full);
+
+        // ── Instrument list ──
+        let items: Vec<ListItem> = self.merval_instruments.iter().map(|instr| {
+            let short = instr.trim_start_matches("M:bm_MERV_").trim_end_matches("_24hs").trim_end_matches("_48hs");
+            let selected = self.merval_selected_instr.as_deref() == Some(instr.as_str());
+            let style = if selected {
+                Style::default().fg(Color::Black).bg(Color::LightBlue).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(Span::styled(format!(" {} ", short), style))
+        }).collect();
+        let count = items.len();
+        frame.render_stateful_widget(
+            List::new(items)
+                .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
+                .highlight_symbol("▶ ")
+                .block(Block::default().borders(Borders::ALL)
+                    .title(format!(" Instruments ({}) [↑↓][Enter] ", count))),
+            h[0],
+            &mut self.merval_inst_list_state,
+        );
+
+        // ── Right panel: chart on top, orders on bottom ──
+        let right = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(bottom.height)])
+            .split(h[1]);
+
+        if let Some(ref instr) = self.merval_selected_instr.clone() {
+            let short = instr.trim_start_matches("M:bm_MERV_").trim_end_matches("_24hs").trim_end_matches("_48hs");
+
+            if self.merval_price_series.is_empty() {
+                // Show error if there is one, otherwise loading
+                let msg = if let Some(ref e) = self.hist_error {
+                    format!("  Error: {e}")
+                } else {
+                    format!("  Loading {} ({})…", short, self.merval_time_range.label())
+                };
+                frame.render_widget(
+                    Paragraph::new(msg)
+                        .block(Block::default().borders(Borders::ALL).title(format!(" {} ", short))),
+                    right[0],
+                );
+            } else {
+                let series = &self.merval_price_series;
+                let prices: Vec<f64> = series.iter().map(|p| p.1).collect();
+                let min = prices.iter().cloned().fold(f64::MAX, f64::min);
+                let max = prices.iter().cloned().fold(f64::MIN, f64::max);
+                let pad = (max - min) * 0.05 + 0.01;
+                let n = series.len() as f64;
+                let color = if prices.last().unwrap_or(&0.0) >= prices.first().unwrap_or(&0.0) { Color::Green } else { Color::Red };
+
+                let dataset = Dataset::default()
+                    .marker(symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(color))
+                    .data(series);
+
+                // Build evenly-spaced time labels from stored labels
+                let labels = &self.merval_price_labels;
+                let x_labels: Vec<Span> = if labels.len() >= 2 {
+                    let mid = labels.len() / 2;
+                    vec![
+                        Span::styled(labels[0].clone(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(labels[mid].clone(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(labels[labels.len()-1].clone(), Style::default().fg(Color::DarkGray)),
+                    ]
+                } else {
+                    vec![Span::raw("open"), Span::raw("close")]
+                };
+
+                let chart = Chart::new(vec![dataset])
+                    .block(Block::default().borders(Borders::ALL)
+                        .title(format!(" {} — {} ({} pts)  [t] range ", short, self.merval_time_range.label(), series.len())))
+                    .x_axis(Axis::default().bounds([0.0, n]).labels(x_labels))
+                    .y_axis(Axis::default().bounds([min - pad, max + pad])
+                        .labels(vec![
+                            Span::styled(format!("{:.2}", min), Style::default().fg(Color::DarkGray)),
+                            Span::styled(format!("{:.2}", max), Style::default().fg(Color::DarkGray)),
+                        ]));
+                frame.render_widget(chart, right[0]);
             }
+
+            // Orders table in bottom panel
+            let header = ratatui::widgets::Row::new(vec!["Time","Price","Vol","Side"])
+                .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+            let orders = self.merval_detail_orders.clone();
+            let rows: Vec<ratatui::widgets::Row> = orders.iter().map(|r| {
+                let color = if r.side == "B" { Color::Green } else { Color::Red };
+                ratatui::widgets::Row::new(vec![
+                    r.time.format("%H:%M:%S").to_string(),
+                    format!("{:.2}", r.price),
+                    r.volume.to_string(),
+                    if r.side == "B" { "BUY".into() } else { "SELL".into() },
+                ]).style(Style::default().fg(color))
+            }).collect();
+            let table = Table::new(rows, [Constraint::Length(10), Constraint::Length(12), Constraint::Length(10), Constraint::Length(6)])
+                .header(header)
+                .highlight_style(Style::default().fg(Color::Black).bg(Color::LightBlue).add_modifier(Modifier::BOLD))
+                .block(Block::default().borders(Borders::ALL)
+                    .title(format!(" {} Orders ({}) [↑↓] scroll ", short, orders.len())));
+            frame.render_stateful_widget(table, right[1], &mut self.merval_detail_orders_state);
+        } else {
+            frame.render_widget(
+                Paragraph::new("  Select an instrument and press [Enter] to load chart")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .block(Block::default().borders(Borders::ALL).title(" Chart ")),
+                right[0],
+            );
+            frame.render_widget(
+                Paragraph::new("").block(Block::default().borders(Borders::ALL).title(" Orders ")),
+                right[1],
+            );
         }
     }
 
@@ -2109,7 +2471,7 @@ impl TradingApp {
             .constraints([Constraint::Length(10), Constraint::Min(0)])
             .split(area);
 
-        // Bar chart
+        // Term structure chart
         if self.futures_curve.is_empty() {
             frame.render_widget(
                 Paragraph::new("  Loading futures curve… [r] refresh")
@@ -2117,24 +2479,55 @@ impl TradingApp {
                 v[0],
             );
         } else {
-            let curve = self.futures_curve.clone();
-            let bar_data: Vec<(&str, u64)> = curve.iter().map(|r| {
-                // label = last 5 chars of instrument e.g. "MAR26"
-                let label = if r.instrument.len() >= 5 {
-                    &r.instrument[r.instrument.len()-5..]
-                } else { &r.instrument };
-                // leak to get 'static — acceptable for small UI strings
-                let label: &'static str = Box::leak(label.to_string().into_boxed_str());
-                (label, r.last_price as u64)
+            let curve = &self.futures_curve;
+            let sel = self.futures_selected.min(curve.len() - 1);
+
+            // Build (x, price) points — x = contract index
+            let points: Vec<(f64, f64)> = curve.iter().enumerate()
+                .map(|(i, r)| (i as f64, r.last_price))
+                .collect();
+
+            let prices: Vec<f64> = curve.iter().map(|r| r.last_price).collect();
+            let min = prices.iter().cloned().fold(f64::MAX, f64::min);
+            let max = prices.iter().cloned().fold(f64::MIN, f64::max);
+            let padding = (max - min) * 0.1 + 1.0;
+
+            // X-axis labels = contract month names
+            let x_labels: Vec<Span> = curve.iter().map(|r| {
+                let label = r.instrument.split('_').last().unwrap_or(&r.instrument);
+                Span::raw(label.to_string())
             }).collect();
-            let chart = BarChart::default()
+
+            // Highlight selected contract with a dot dataset
+            let selected_point = vec![(sel as f64, curve[sel].last_price)];
+
+            let datasets = vec![
+                Dataset::default()
+                    .name("DLR Futures")
+                    .marker(symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(Color::Magenta))
+                    .data(&points),
+                Dataset::default()
+                    .marker(symbols::Marker::Block)
+                    .style(Style::default().fg(Color::Yellow))
+                    .data(&selected_point),
+            ];
+
+            let chart = Chart::new(datasets)
                 .block(Block::default().borders(Borders::ALL)
-                    .title(format!(" DLR Futures Curve — [←→] select contract ({})", curve[self.futures_selected.min(curve.len()-1)].instrument)))
-                .data(&bar_data)
-                .bar_width(12)
-                .bar_gap(2)
-                .bar_style(Style::default().fg(Color::Magenta))
-                .value_style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+                    .title(format!(" DLR Term Structure — {} selected  [←→] switch ", curve[sel].instrument)))
+                .x_axis(Axis::default()
+                    .bounds([0.0, (curve.len() - 1) as f64])
+                    .labels(x_labels))
+                .y_axis(Axis::default()
+                    .bounds([min - padding, max + padding])
+                    .labels(vec![
+                        Span::styled(format!("{:.0}", min - padding), Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!("{:.0}", (min + max) / 2.0), Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!("{:.0}", max + padding), Style::default().fg(Color::DarkGray)),
+                    ]));
+
             frame.render_widget(chart, v[0]);
         }
 
@@ -2169,7 +2562,7 @@ impl TradingApp {
     fn render_news_tab(&mut self, area: Rect, frame: &mut Frame) {
         if self.news_loading {
             frame.render_widget(
-                Paragraph::new("  Fetching news from ByMA and Reuters…")
+                Paragraph::new("  Fetching news from ByMA, NewsAPI and Yahoo Finance…")
                     .block(Block::default().borders(Borders::ALL).title(" News ")),
                 area,
             );
@@ -2184,13 +2577,25 @@ impl TradingApp {
             );
             return;
         }
+
+        // Split: list on top, detail panel on bottom
+        let v = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(5), Constraint::Length(8)])
+            .split(area);
+
+        // List
         let items: Vec<ListItem> = self.news_items.iter().map(|n| {
             let (badge, color) = if n.source == "ByMA" {
-                ("[ByMA]        ", Color::Cyan)
-            } else if n.source == "Yahoo Finance" {
-                ("[Yahoo Finance]", Color::Magenta)
+                ("[ByMA]          ", Color::Cyan)
+            } else if n.source == "Yahoo Global" {
+                ("[Yahoo Global]  ", Color::Yellow)
+            } else if n.source == "Yahoo Argentina" {
+                ("[Yahoo Argentina]", Color::LightBlue)
+            } else if n.source == "Yahoo Stocks" {
+                ("[Yahoo Stocks]  ", Color::Magenta)
             } else {
-                ("[News]        ", Color::Yellow)
+                ("[News]          ", Color::White)
             };
             let has_url = !n.url.is_empty();
             ListItem::new(Line::from(vec![
@@ -2206,21 +2611,256 @@ impl TradingApp {
             List::new(items)
                 .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
                 .block(Block::default().borders(Borders::ALL)
-                    .title(format!(" News ({}) [↑↓] scroll  [r] refresh ", count))),
-            area,
+                    .title(format!(" News ({}) [↑↓] scroll  [Enter] open  [r] refresh ", count))),
+            v[0],
             &mut self.news_state,
         );
+
+        // Detail panel — show description of selected item
+        let detail = if let Some(idx) = self.news_state.selected() {
+            self.news_items.get(idx).map(|n| {
+                let body = if n.description.is_empty() {
+                    format!("  {}\n\n  URL: {}", n.headline, n.url)
+                } else {
+                    format!("  {}\n\n  {}", n.headline, n.description)
+                };
+                (body, n.source.clone())
+            })
+        } else {
+            None
+        };
+
+        if let Some((body, source)) = detail {
+            let color = if source == "ByMA" { Color::Cyan }
+                        else if source == "Yahoo Global" { Color::Yellow }
+                        else if source == "Yahoo Argentina" { Color::LightBlue }
+                        else if source == "Yahoo Stocks" { Color::Magenta }
+                        else { Color::White };
+            frame.render_widget(
+                Paragraph::new(body)
+                    .wrap(ratatui::widgets::Wrap { trim: true })
+                    .style(Style::default().fg(Color::White))
+                    .block(Block::default().borders(Borders::ALL)
+                        .title(format!(" {} — Article Summary ", source))
+                        .border_style(Style::default().fg(color))),
+                v[1],
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new("  Select an item to see summary")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .block(Block::default().borders(Borders::ALL).title(" Article Summary ")),
+                v[1],
+            );
+        }
+    }
+
+    // ─── US Futures tab ──────────────────────────────────────────────────
+
+    fn us_futures_name(sym: &str) -> &'static str {
+        match sym {
+            "ES=F" => "S&P 500",
+            "NQ=F" => "Nasdaq 100",
+            "YM=F" => "Dow Jones",
+            "CL=F" => "Crude Oil WTI",
+            "GC=F" => "Gold",
+            "SI=F" => "Silver",
+            "ZB=F" => "US 30Y Bond",
+            _      => "",
+        }
+    }
+
+    fn render_us_futures_tab(&mut self, area: Rect, frame: &mut Frame) {
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(30), Constraint::Min(0)])
+            .split(area);
+
+        // Left: symbol list with live prices
+        let items: Vec<ListItem> = self.us_futures_symbols.iter().enumerate().map(|(i, &sym)| {
+            let (price, prev) = self.us_futures_live.get(sym).copied().unwrap_or((0.0, 0.0));
+            let selected = i == self.us_futures_selected;
+            let chg_color = if price >= prev { Color::Green } else { Color::Red };
+            let base = if selected {
+                Style::default().fg(Color::Black).bg(Color::LightRed).add_modifier(Modifier::BOLD)
+            } else { Style::default() };
+            let name = Self::us_futures_name(sym);
+            ListItem::new(Line::from(vec![
+                Span::styled(format!(" {:<7}", sym), base),
+                Span::styled(
+                    if price > 0.0 { format!("{:>10.2}", price) } else { "      --".to_string() },
+                    if selected { base } else { Style::default().fg(chg_color) },
+                ),
+                Span::styled(format!(" {}", name), if selected { base } else { Style::default().fg(Color::DarkGray) }),
+            ]))
+        }).collect();
+
+        frame.render_widget(
+            List::new(items)
+                .highlight_style(Style::default().fg(Color::Black).bg(Color::LightRed).add_modifier(Modifier::BOLD))
+                .block(Block::default().borders(Borders::ALL).title(" US Futures [←→] ")),
+            h[0],
+        );
+
+        // Right: OHLCV chart for selected symbol
+        let sym = self.us_futures_symbols[self.us_futures_selected];
+        if self.us_futures_ohlcv.is_empty() {
+            frame.render_widget(
+                Paragraph::new(format!("  Loading {} OHLCV…", sym))
+                    .block(Block::default().borders(Borders::ALL).title(format!(" {} ", sym))),
+                h[1],
+            );
+            return;
+        }
+
+        let ohlcv = &self.us_futures_ohlcv;
+        let points: Vec<(f64, f64)> = ohlcv.iter().enumerate()
+            .map(|(i, r)| (i as f64, r.close)).collect();
+        let prices: Vec<f64> = ohlcv.iter().map(|r| r.close).collect();
+        let min = prices.iter().cloned().fold(f64::MAX, f64::min);
+        let max = prices.iter().cloned().fold(f64::MIN, f64::max);
+        let pad = (max - min) * 0.05 + 0.01;
+        let n = points.len() as f64;
+        let color = if prices.last().unwrap_or(&0.0) >= prices.first().unwrap_or(&0.0) { Color::Green } else { Color::Red };
+
+        // Live price overlay
+        let (live_price, _) = self.us_futures_live.get(sym).copied().unwrap_or((0.0, 0.0));
+        let live_str = if live_price > 0.0 { format!("  Live: {:.2}", live_price) } else { String::new() };
+
+        let tz = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // ET
+        let x_labels: Vec<Span> = if ohlcv.len() >= 2 {
+            let mid = ohlcv.len() / 2;
+            vec![
+                Span::styled(ohlcv[0].time.with_timezone(&tz).format("%m/%d %H:%M").to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled(ohlcv[mid].time.with_timezone(&tz).format("%m/%d %H:%M").to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled(ohlcv.last().unwrap().time.with_timezone(&tz).format("%m/%d %H:%M").to_string(), Style::default().fg(Color::DarkGray)),
+            ]
+        } else { vec![] };
+
+        let dataset = Dataset::default()
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(color))
+            .data(&points);
+
+        let chart = Chart::new(vec![dataset])
+            .block(Block::default().borders(Borders::ALL)
+                .title(format!(" {} — {} — {} candles (ET){} ", sym, Self::us_futures_name(sym), ohlcv.len(), live_str)))
+            .x_axis(Axis::default().bounds([0.0, n]).labels(x_labels))
+            .y_axis(Axis::default().bounds([min - pad, max + pad])
+                .labels(vec![
+                    Span::styled(format!("{:.2}", min), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:.2}", max), Style::default().fg(Color::DarkGray)),
+                ]));
+        frame.render_widget(chart, h[1]);
+    }
+
+    // ─── Markets tab ─────────────────────────────────────────────────────
+
+    fn render_markets_tab(&self, area: Rect, frame: &mut Frame) {
+        use chrono::{Timelike, Utc, Weekday, Datelike};
+
+        let now = Utc::now();
+        let weekday = now.weekday();
+        let is_weekend = weekday == Weekday::Sat || weekday == Weekday::Sun;
+
+        // (name, lon, lat, open_utc, close_utc, tz_offset_hours, no_weekend)
+        // open/close in local time hours
+        let markets: &[(&str, f64, f64, u32, u32, i32)] = &[
+            ("NYSE/NASDAQ",  -74.0,  40.7,  9,  16, -5),
+            ("Argentina",    -58.4, -34.6, 11,  17, -3),
+            ("Brazil",       -43.2, -22.9, 10,  17, -3),
+            ("London",        -0.1,  51.5,  8,  16,  0),
+            ("Frankfurt",      8.7,  50.1,  9,  17,  1),
+            ("Paris",          2.3,  48.9,  9,  17,  1),
+            ("Madrid",        -3.7,  40.4,  9,  17,  1),
+            ("Milan",          9.2,  45.5,  9,  17,  1),
+            ("Tokyo",        139.7,  35.7,  9,  15,  9),
+            ("Shanghai",     121.5,  31.2,  9,  15,  8),
+            ("Hong Kong",    114.2,  22.3,  9,  16,  8),
+        ];
+
+        let canvas = Canvas::default()
+            .block(Block::default().borders(Borders::ALL)
+                .title(format!(" Global Markets — {} UTC  [6] ", now.format("%H:%M"))))
+            .marker(symbols::Marker::Braille)
+            .x_bounds([-180.0, 180.0])
+            .y_bounds([-90.0, 90.0])
+            .paint(move |ctx| {
+                ctx.draw(&Map {
+                    color: Color::DarkGray,
+                    resolution: MapResolution::High,
+                });
+
+                for &(name, lon, lat, open_h, close_h, tz_offset) in markets {
+                    // Convert current UTC to local time for this market
+                    let local_h = (now.hour() as i32 + tz_offset).rem_euclid(24) as u32;
+                    let local_m = now.minute();
+                    let local_time = local_h * 60 + local_m;
+                    let open_min  = open_h  * 60;
+                    let close_min = close_h * 60;
+                    let is_open = !is_weekend && local_time >= open_min && local_time < close_min;
+
+                    let (color, status) = if is_open {
+                        (Color::Green, "●")
+                    } else {
+                        (Color::Red, "○")
+                    };
+
+                    // Draw a dot at the market location
+                    ctx.print(lon, lat, Span::styled(
+                        format!("{} {}", status, name),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ));
+                }
+            });
+
+        // Split: map on top, legend on bottom
+        let v = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(14)])
+            .split(area);
+
+        frame.render_widget(canvas, v[0]);
+
+        // Legend table
+        let header = ratatui::widgets::Row::new(vec!["Market", "Local Time", "Hours (local)", "Status"])
+            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+
+        let rows: Vec<ratatui::widgets::Row> = markets.iter().map(|&(name, _, _, open_h, close_h, tz_offset)| {
+            let local_h = (now.hour() as i32 + tz_offset).rem_euclid(24) as u32;
+            let local_m = now.minute();
+            let local_time = local_h * 60 + local_m;
+            let is_open = !is_weekend && local_time >= open_h * 60 && local_time < close_h * 60;
+            let (status, color) = if is_open { ("OPEN", Color::Green) } else { ("CLOSED", Color::Red) };
+            ratatui::widgets::Row::new(vec![
+                name.to_string(),
+                format!("{:02}:{:02}", local_h, local_m),
+                format!("{:02}:00 – {:02}:00", open_h, close_h),
+                status.to_string(),
+            ]).style(Style::default().fg(color))
+        }).collect();
+
+        let table = Table::new(rows, [
+            Constraint::Length(16), Constraint::Length(12),
+            Constraint::Length(16), Constraint::Length(8),
+        ])
+        .header(header)
+        .block(Block::default().borders(Borders::ALL).title(" Market Hours (local time) "));
+        frame.render_widget(table, v[1]);
     }
 
     // ─── Tabs ───────────────────────────────────────────────────────────
 
     fn render_tabs(&self, area: Rect, frame: &mut Frame) {
         let tab_defs: &[(&str, ExchangeTab, Color)] = &[
-            (" [1]Binance ",  ExchangeTab::Binance,  Color::Yellow),
-            (" [2]MERVAL ",   ExchangeTab::Merval,   Color::LightBlue),
-            (" [3]Options ",  ExchangeTab::Options,  Color::Green),
-            (" [4]Futures ",  ExchangeTab::Futures,  Color::Magenta),
-            (" [5]News ",     ExchangeTab::News,     Color::Cyan),
+            (" [1]Binance ",   ExchangeTab::Binance,   Color::Yellow),
+            (" [2]MERVAL ",    ExchangeTab::Merval,    Color::LightBlue),
+            (" [3]Options ",   ExchangeTab::Options,   Color::Green),
+            (" [4]Futures ",   ExchangeTab::Futures,   Color::Magenta),
+            (" [5]News ",      ExchangeTab::News,      Color::Cyan),
+            (" [6]Markets ",   ExchangeTab::Markets,   Color::White),
+            (" [7]US Futures", ExchangeTab::UsFutures, Color::LightRed),
         ];
         let titles: Vec<Line> = tab_defs.iter().map(|(label, tab, color)| {
             Line::from(Span::styled(
@@ -2243,41 +2883,88 @@ impl TradingApp {
     // ─── Status bar ─────────────────────────────────────────────────────
 
     fn render_status_bar(&self, area: Rect, frame: &mut Frame) {
-        let dot = if self.binance_connected {
-            Span::styled("● LIVE", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-        } else {
-            Span::styled("○ CONNECTING", Style::default().fg(Color::Red))
-        };
-
-        let info = if let Some(sym) = self.selected_sym() {
-            if let Some(d) = self.symbol_map.get(sym) {
-                let chg_color = if d.daily_change_pct >= 0.0 { Color::Green } else { Color::Red };
+        let info = match self.active_tab {
+            ExchangeTab::Merval => {
                 Line::from(vec![
-                    Span::raw("Binance "),
-                    dot,
+                    Span::styled("MERVAL", Style::default().fg(Color::LightBlue).add_modifier(Modifier::BOLD)),
                     Span::styled(
-                        format!("  {} | Close: {:.4}  O:{:.4}  H:{:.4}  L:{:.4}  Vol:{}  Chg: ",
-                            sym, d.close, d.open, d.high, d.low, fmt_volume(d.volume)),
+                        format!("  ARS {:.0}  Chg: {:.2}%  Vol: {:.0}  Status: {}",
+                            self.merval_data.current_price,
+                            self.merval_data.daily_change,
+                            self.merval_data.volume_24h,
+                            self.merval_data.market_status),
                         Style::default().fg(Color::Cyan),
                     ),
-                    Span::styled(
-                        format!("{:+.4}%", d.daily_change_pct),
-                        Style::default().fg(chg_color).add_modifier(Modifier::BOLD),
-                    ),
                 ])
-            } else {
-                Line::from(vec![Span::raw("Binance "), dot, Span::raw("  Waiting for data...")])
             }
-        } else {
-            Line::from(vec![
-                Span::raw("Binance "),
-                dot,
-                if let Some(e) = &self.error_message {
-                    Span::styled(format!("  {e}"), Style::default().fg(Color::DarkGray))
+            ExchangeTab::Options => {
+                let spot_str = if self.ggal_spot > 0.0 { format!("GGAL spot: {:.2} ARS", self.ggal_spot) }
+                               else { "GGAL spot: loading…".to_string() };
+                Line::from(Span::styled(spot_str, Style::default().fg(Color::Green)))
+            }
+            ExchangeTab::Futures => {
+                if self.futures_curve.is_empty() {
+                    Line::from(Span::styled("DLR Futures — loading…", Style::default().fg(Color::Magenta)))
                 } else {
-                    Span::raw("  Waiting for Redis data...")
-                },
-            ])
+                    let parts: Vec<String> = self.futures_curve.iter()
+                        .map(|r| {
+                            let label = r.instrument.split('_').last().unwrap_or(&r.instrument);
+                            format!("{}: {:.0}", label, r.last_price)
+                        }).collect();
+                    Line::from(Span::styled(parts.join("   "), Style::default().fg(Color::Magenta)))
+                }
+            }
+            ExchangeTab::News => {
+                Line::from(Span::styled(
+                    format!("News — {} items", self.news_items.len()),
+                    Style::default().fg(Color::Cyan),
+                ))
+            }
+            ExchangeTab::Markets => {
+                Line::from(Span::styled(
+                    "Global Markets — ● open  ○ closed",
+                    Style::default().fg(Color::White),
+                ))
+            }
+            ExchangeTab::UsFutures => {
+                let sym = self.us_futures_symbols[self.us_futures_selected];
+                let (price, prev) = self.us_futures_live.get(sym).copied().unwrap_or((0.0, 0.0));
+                let chg_color = if price >= prev { Color::Green } else { Color::Red };
+                Line::from(vec![
+                    Span::styled(format!(" {} ", sym), Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("{:.2}", price), Style::default().fg(chg_color).add_modifier(Modifier::BOLD)),
+                ])
+            }
+            ExchangeTab::Binance => {
+                let dot = if self.binance_connected {
+                    Span::styled("● LIVE", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                } else {
+                    Span::styled("○ CONNECTING", Style::default().fg(Color::Red))
+                };
+                if let Some(sym) = self.selected_sym() {
+                    if let Some(d) = self.symbol_map.get(sym) {
+                        let chg_color = if d.daily_change_pct >= 0.0 { Color::Green } else { Color::Red };
+                        Line::from(vec![
+                            Span::raw("Binance "), dot,
+                            Span::styled(
+                                format!("  {} | Close: {:.4}  O:{:.4}  H:{:.4}  L:{:.4}  Vol:{}  Chg: ",
+                                    sym, d.close, d.open, d.high, d.low, fmt_volume(d.volume)),
+                                Style::default().fg(Color::Cyan),
+                            ),
+                            Span::styled(format!("{:+.4}%", d.daily_change_pct),
+                                Style::default().fg(chg_color).add_modifier(Modifier::BOLD)),
+                        ])
+                    } else {
+                        Line::from(vec![Span::raw("Binance "), dot, Span::raw("  Waiting for data...")])
+                    }
+                } else {
+                    Line::from(vec![Span::raw("Binance "), dot,
+                        if let Some(e) = &self.error_message {
+                            Span::styled(format!("  {e}"), Style::default().fg(Color::DarkGray))
+                        } else { Span::raw("  Waiting for Redis data...") }
+                    ])
+                }
+            }
         };
 
         let paragraph = Paragraph::new(info).block(Block::default().borders(Borders::TOP));
@@ -2359,28 +3046,56 @@ impl TradingApp {
     }
 
     fn render_price_chart(&self, area: Rect, frame: &mut Frame) {
-        let (title, history, color) =
-            if let Some(sym) = self.selected_sym() {
-                if let Some(d) = self.symbol_map.get(sym) {
-                    if d.price_history.is_empty() {
-                        (format!(" {} Waiting... ", sym), vec![], Color::DarkGray)
-                    } else {
-                        let color = if d.daily_change_pct >= 0.0 { Color::Green } else { Color::Red };
-                        (format!(" {} Price ", sym), d.price_history.clone(), color)
-                    }
-                } else {
-                    (" Waiting... ".to_string(), vec![], Color::DarkGray)
-                }
-            } else {
-                (" No data ".to_string(), vec![], Color::DarkGray)
-            };
+        let Some(sym) = self.selected_sym() else {
+            frame.render_widget(Paragraph::new("No data").block(Block::default().borders(Borders::ALL)), area);
+            return;
+        };
+        let Some(d) = self.symbol_map.get(sym) else {
+            frame.render_widget(Paragraph::new("Waiting…").block(Block::default().borders(Borders::ALL)), area);
+            return;
+        };
+        if d.price_history.is_empty() {
+            frame.render_widget(
+                Paragraph::new("  Waiting for data…").block(Block::default().borders(Borders::ALL).title(format!(" {} ", sym))),
+                area,
+            );
+            return;
+        }
 
-        let sparkline = Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title(title))
-            .data(&history)
-            .style(Style::default().fg(color));
+        // Convert u64 scaled history back to f64 prices
+        let points: Vec<(f64, f64)> = d.price_history.iter().enumerate()
+            .map(|(i, &v)| (i as f64, v as f64 / 100.0))
+            .collect();
 
-        frame.render_widget(sparkline, area);
+        let min = points.iter().map(|p| p.1).fold(f64::MAX, f64::min);
+        let max = points.iter().map(|p| p.1).fold(f64::MIN, f64::max);
+        let padding = (max - min) * 0.05 + 0.0001;
+        let color = if d.daily_change_pct >= 0.0 { Color::Green } else { Color::Red };
+        let n = points.len() as f64;
+
+        let dataset = Dataset::default()
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(color))
+            .data(&points);
+
+        let chart = Chart::new(vec![dataset])
+            .block(Block::default().borders(Borders::ALL)
+                .title(format!(" {} Price  {:.4}  {:+.2}% ", sym, d.close, d.daily_change_pct)))
+            .x_axis(Axis::default()
+                .bounds([0.0, n])
+                .labels(vec![
+                    Span::raw("oldest"),
+                    Span::raw("latest"),
+                ]))
+            .y_axis(Axis::default()
+                .bounds([min - padding, max + padding])
+                .labels(vec![
+                    Span::styled(format!("{:.4}", min), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:.4}", max), Style::default().fg(Color::DarkGray)),
+                ]));
+
+        frame.render_widget(chart, area);
     }
 
     fn render_symbol_stats(&self, area: Rect, frame: &mut Frame) {
@@ -2663,18 +3378,18 @@ impl TradingApp {
             ),
             InputMode::Normal => {
                 let hint = match self.active_tab {
-                    ExchangeTab::Options => "[↑↓] underlying  [Enter] load chain  [c] calculator  [r] refresh  [Tab] next tab  [q] quit",
-                    ExchangeTab::Futures => "[←→] contract  [↑↓] scroll ticks  [r] refresh  [Tab] next tab  [q] quit",
-                    ExchangeTab::News    => "[↑↓] scroll  [Enter] open in browser  [r] refresh  [Tab] next tab  [q] quit",
+                    ExchangeTab::Options => "[↑↓] scroll  [Tab] calls/puts  [c] calculator  [r] refresh  [←→] prev/next tab  [q] quit",
+                    ExchangeTab::Futures => "[←→] switch contract  [↑↓] scroll ticks  [r] refresh  [1-5] switch tab  [q] quit",
+                    ExchangeTab::News    => "[↑↓] scroll  [Enter] open article  [r] refresh  [1-5] switch tab  [q] quit",
                     _ => match (self.active_tab, active_subtab) {
-                        (ExchangeTab::Merval, SubTab::Historical) if self.merval_hist_tab == MervalHistTab::Favorites =>
-                            "[↑↓] scroll  [←→] nav favorites  [a] add  [d] del  [p] panel  [f] filter  [s] real-time  [Tab] next tab  [q] quit",
-                        (_, SubTab::Historical) =>
-                            "[↑↓] scroll  [p] switch panel  [f] filter  [s] real-time  [Tab] next tab  [q] quit",
+                        (ExchangeTab::Merval, SubTab::Historical) =>
+                            "[↑↓] select instrument  [Enter] load chart  [t] time range  [f] filter  [s] real-time  [1-5] tab  [q] quit",
+                        (ExchangeTab::Binance, SubTab::Historical) =>
+                            "[↑↓] scroll  [p] panel  [f] filter  [s] real-time  [1-5] tab  [q] quit",
                         (ExchangeTab::Merval, SubTab::RealTime) =>
-                            "[o] new order  [↑↓] navigate  [s] historical  [Tab] next tab  [q] quit",
+                            "[o] new order  [↑↓] navigate  [s] historical  [1-5] tab  [q] quit",
                         _ =>
-                            "[↑↓] select symbol  [s] historical  [Tab] next tab  [q] quit",
+                            "[↑↓] select symbol  [s] historical  [1-5] tab  [q] quit",
                     },
                 };
                 (hint.to_string(), Style::default().fg(Color::DarkGray))

@@ -87,12 +87,54 @@ pub struct BinanceTrade {
     pub trade_id: u64,
 }
 
+// ── Matriz tick (MERVAL real-time) ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MatrizTick {
+    pub instrument: String,
+    #[serde(deserialize_with = "de_f64_or_str", default)]
+    pub bid_price: f64,
+    #[serde(deserialize_with = "de_f64_or_str", default)]
+    pub ask_price: f64,
+    #[serde(deserialize_with = "de_f64_or_str", default)]
+    pub last_price: f64,
+    #[serde(deserialize_with = "de_f64_or_str", default)]
+    pub high: f64,
+    #[serde(deserialize_with = "de_f64_or_str", default)]
+    pub low: f64,
+    #[serde(deserialize_with = "de_f64_or_str", default)]
+    pub prev_close: f64,
+}
+
+// ── Matriz order (MERVAL executed trade) ───────────────────────────────────
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MatrizOrder {
+    pub instrument: String,
+    #[serde(deserialize_with = "de_f64_or_str")]
+    pub price: f64,
+    #[serde(deserialize_with = "de_u64_or_str")]
+    pub volume: u64,
+    pub side: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UsFuturesTick {
+    pub symbol: String,
+    #[serde(deserialize_with = "de_f64_or_str")]
+    pub last_price: f64,
+    pub last_volume: u64,
+}
+
 // ── App-level message enum ──────────────────────────────────────────────────
 
 #[derive(Debug)]
 pub enum WebSocketMessage {
     TickUpdate(BinanceTick),
     TradeUpdate(BinanceTrade),
+    UsFuturesTick(UsFuturesTick),
+    MatrizTick(MatrizTick),
+    MatrizOrder(MatrizOrder),
     OrderUpdate(Order),
     Connected(String),
     Disconnected(String),

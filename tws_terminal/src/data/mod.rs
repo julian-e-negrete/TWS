@@ -43,6 +43,19 @@ impl BinanceSymbolData {
         }
     }
 
+    pub fn seed_history(&mut self, historical: Vec<u64>) {
+        if historical.is_empty() { return; }
+        // Prepend historical points, then append any live points already collected
+        let live = self.price_history.clone();
+        self.price_history = historical;
+        self.price_history.extend(live);
+        // Keep last 500 points
+        let len = self.price_history.len();
+        if len > 500 {
+            self.price_history.drain(0..len - 500);
+        }
+    }
+
     pub fn update(&mut self, open: f64, high: f64, low: f64, close: f64, volume: f64) {
         // Lock the session open price on the first tick received
         if self.open == 0.0 && open > 0.0 {
@@ -64,7 +77,7 @@ impl BinanceSymbolData {
         // magnitude doesn't matter — only relative movement within the symbol.
         let scaled = (close * 100.0) as u64;
         self.price_history.push(scaled);
-        if self.price_history.len() > 120 {
+        if self.price_history.len() > 500 {
             self.price_history.remove(0);
         }
 
