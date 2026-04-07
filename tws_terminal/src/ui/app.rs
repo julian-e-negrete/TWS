@@ -339,6 +339,8 @@ pub struct TradingApp {
 
     // ── US Futures tab ──
     pub us_futures_live:    std::collections::HashMap<String, (f64, f64)>, // symbol → (price, prev_price)
+    pub us_futures_history: std::collections::HashMap<String, Vec<(f64, f64)>>, // symbol → price history for live chart
+    pub us_futures_subtab:  SubTab,
     pub us_futures_selected: usize,
     pub us_futures_ohlcv:   Vec<crate::db::UsFuturesOhlcv>,
     pub us_futures_symbols: Vec<&'static str>,
@@ -419,6 +421,8 @@ impl TradingApp {
             news_state:   ratatui::widgets::ListState::default(),
             news_loading: false,
             us_futures_live:     std::collections::HashMap::new(),
+            us_futures_history:  std::collections::HashMap::new(),
+            us_futures_subtab:   SubTab::RealTime,
             us_futures_selected: 0,
             us_futures_ohlcv:    Vec::new(),
             us_futures_symbols:  vec!["ES=F","NQ=F","YM=F","CL=F","GC=F","SI=F","ZB=F"],
@@ -802,10 +806,10 @@ impl TradingApp {
                 }
             }
 
-            // NewsAPI
+            // NewsAPI — top financial outlets, sorted by date
             if !newsapi_key.is_empty() {
                 let url = format!(
-                    "https://newsapi.org/v2/everything?q=finance+markets+economy&language=en&sortBy=publishedAt&pageSize=20&apiKey={}",
+                    "https://newsapi.org/v2/everything?domains=reuters.com,bloomberg.com,ft.com,wsj.com,marketwatch.com&language=en&sortBy=publishedAt&pageSize=20&apiKey={}",
                     newsapi_key
                 );
                 let result = reqwest::Client::builder()
@@ -1060,6 +1064,11 @@ impl TradingApp {
                 let entry = self.us_futures_live.entry(tick.symbol.clone()).or_insert((0.0, 0.0));
                 entry.1 = entry.0;
                 entry.0 = tick.last_price;
+                // Append to live price history (capped at 500)
+                let hist = self.us_futures_history.entry(tick.symbol.clone()).or_default();
+                let i = hist.len() as f64;
+                hist.push((i, tick.last_price));
+                if hist.len() > 500 { hist.remove(0); }
             }
             WebSocketMessage::MatrizTick(tick) => {
                 // Update MERVAL live data for the matching instrument
@@ -1114,6 +1123,12 @@ impl TradingApp {
                                 if self.merval_instruments.is_empty() {
                                     self.trigger_merval_instruments_fetch();
                                 }
+                            }
+                        }
+                        ExchangeTab::UsFutures => {
+                            self.us_futures_subtab = self.us_futures_subtab.toggle();
+                            if self.us_futures_subtab == SubTab::Historical && self.us_futures_ohlcv.is_empty() {
+                                self.trigger_us_futures_ohlcv();
                             }
                         }
                         _ => {}
@@ -1243,11 +1258,7 @@ impl TradingApp {
                             self.fetch_futures_ticks_for(&instr);
                         }
                     } else if self.active_tab == ExchangeTab::UsFutures {
-                        if self.us_futures_selected + 1 < self.us_futures_symbols.len() {
-                            self.us_futures_selected += 1;
-                            self.us_futures_ohlcv.clear();
-                            self.trigger_us_futures_ohlcv();
-                        }
+                        // handled by ↑↓
                     } else {
                         self.active_tab = match self.active_tab {
                             ExchangeTab::Binance   => ExchangeTab::Merval,
@@ -1276,9 +1287,7 @@ impl TradingApp {
                         let instr = self.futures_curve[self.futures_selected].instrument.clone();
                         self.fetch_futures_ticks_for(&instr);
                     } else if self.active_tab == ExchangeTab::UsFutures && self.us_futures_selected > 0 {
-                        self.us_futures_selected -= 1;
-                        self.us_futures_ohlcv.clear();
-                        self.trigger_us_futures_ohlcv();
+                        // handled by ↑↓
                     } else {
                         self.active_tab = match self.active_tab {
                             ExchangeTab::Binance   => ExchangeTab::UsFutures,
@@ -1300,6 +1309,13 @@ impl TradingApp {
                             let state = if self.options_show_calls { &mut self.options_chain_state } else { &mut self.options_puts_state };
                             let cur = state.selected().unwrap_or(0);
                             if cur > 0 { state.select(Some(cur - 1)); }
+                        }
+                        ExchangeTab::UsFutures => {
+                            if self.us_futures_selected > 0 {
+                                self.us_futures_selected -= 1;
+                                self.us_futures_ohlcv.clear();
+                                self.trigger_us_futures_ohlcv();
+                            }
                         }
                         ExchangeTab::News | ExchangeTab::Futures => self.hist_scroll(-1),
                         _ => {
@@ -1348,6 +1364,13 @@ impl TradingApp {
                             };
                             let cur = state.selected().unwrap_or(0);
                             if cur + 1 < len { state.select(Some(cur + 1)); }
+                        }
+                        ExchangeTab::UsFutures => {
+                            if self.us_futures_selected + 1 < self.us_futures_symbols.len() {
+                                self.us_futures_selected += 1;
+                                self.us_futures_ohlcv.clear();
+                                self.trigger_us_futures_ohlcv();
+                            }
                         }
                         ExchangeTab::News | ExchangeTab::Futures => self.hist_scroll(1),
                         _ => {
@@ -2595,7 +2618,8 @@ impl TradingApp {
             } else if n.source == "Yahoo Stocks" {
                 ("[Yahoo Stocks]  ", Color::Magenta)
             } else {
-                ("[News]          ", Color::White)
+                // Reuters, Bloomberg, FT, WSJ, MarketWatch
+                ("[Financial News]", Color::Green)
             };
             let has_url = !n.url.is_empty();
             ListItem::new(Line::from(vec![
@@ -2671,12 +2695,33 @@ impl TradingApp {
     }
 
     fn render_us_futures_tab(&mut self, area: Rect, frame: &mut Frame) {
-        let h = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(30), Constraint::Min(0)])
+        // Sub-tab bar
+        let v = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
             .split(area);
 
-        // Left: symbol list with live prices
+        // Render sub-tab indicator
+        let rt_style = if self.us_futures_subtab == SubTab::RealTime {
+            Style::default().fg(Color::Black).bg(Color::LightRed).add_modifier(Modifier::BOLD)
+        } else { Style::default().fg(Color::DarkGray) };
+        let hist_style = if self.us_futures_subtab == SubTab::Historical {
+            Style::default().fg(Color::Black).bg(Color::LightRed).add_modifier(Modifier::BOLD)
+        } else { Style::default().fg(Color::DarkGray) };
+        frame.render_widget(Paragraph::new(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(" Real-Time ", rt_style),
+            Span::raw(" "),
+            Span::styled(" Historical ", hist_style),
+        ])), v[0]);
+
+        match self.us_futures_subtab {
+            SubTab::RealTime   => self.render_us_futures_realtime(v[1], frame),
+            SubTab::Historical => self.render_us_futures_historical(v[1], frame),
+        }
+    }
+
+    fn render_us_futures_symbol_list(&self, area: Rect, frame: &mut Frame) {
         let items: Vec<ListItem> = self.us_futures_symbols.iter().enumerate().map(|(i, &sym)| {
             let (price, prev) = self.us_futures_live.get(sym).copied().unwrap_or((0.0, 0.0));
             let selected = i == self.us_futures_selected;
@@ -2694,40 +2739,94 @@ impl TradingApp {
                 Span::styled(format!(" {}", name), if selected { base } else { Style::default().fg(Color::DarkGray) }),
             ]))
         }).collect();
-
         frame.render_widget(
             List::new(items)
                 .highlight_style(Style::default().fg(Color::Black).bg(Color::LightRed).add_modifier(Modifier::BOLD))
-                .block(Block::default().borders(Borders::ALL).title(" US Futures [←→] ")),
-            h[0],
+                .block(Block::default().borders(Borders::ALL).title(" US Futures [↑↓] [s] toggle ")),
+            area,
         );
+    }
 
-        // Right: OHLCV chart for selected symbol
+    fn render_us_futures_realtime(&mut self, area: Rect, frame: &mut Frame) {
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(30), Constraint::Min(0)])
+            .split(area);
+
+        self.render_us_futures_symbol_list(h[0], frame);
+
         let sym = self.us_futures_symbols[self.us_futures_selected];
+        let (live_price, prev_price) = self.us_futures_live.get(sym).copied().unwrap_or((0.0, 0.0));
+
+        if let Some(hist) = self.us_futures_history.get(sym) {
+            if !hist.is_empty() {
+                let prices: Vec<f64> = hist.iter().map(|p| p.1).collect();
+                let min = prices.iter().cloned().fold(f64::MAX, f64::min);
+                let max = prices.iter().cloned().fold(f64::MIN, f64::max);
+                let pad = (max - min) * 0.05 + 0.01;
+                let n = hist.len() as f64;
+                let color = if live_price >= prev_price { Color::Green } else { Color::Red };
+                let chg = if prev_price > 0.0 { (live_price - prev_price) / prev_price * 100.0 } else { 0.0 };
+
+                let dataset = Dataset::default()
+                    .marker(symbols::Marker::Braille)
+                    .graph_type(GraphType::Line)
+                    .style(Style::default().fg(color))
+                    .data(hist);
+
+                let chart = Chart::new(vec![dataset])
+                    .block(Block::default().borders(Borders::ALL)
+                        .title(format!(" {} — {} — {:.2}  {:+.3}% ", sym, Self::us_futures_name(sym), live_price, chg)))
+                    .x_axis(Axis::default().bounds([0.0, n])
+                        .labels(vec![Span::raw("oldest"), Span::raw("latest")]))
+                    .y_axis(Axis::default().bounds([min - pad, max + pad])
+                        .labels(vec![
+                            Span::styled(format!("{:.2}", min), Style::default().fg(Color::DarkGray)),
+                            Span::styled(format!("{:.2}", max), Style::default().fg(Color::DarkGray)),
+                        ]));
+                frame.render_widget(chart, h[1]);
+                return;
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(format!("  Waiting for live {} data…", sym))
+                .style(Style::default().fg(Color::DarkGray))
+                .block(Block::default().borders(Borders::ALL).title(format!(" {} Real-Time ", sym))),
+            h[1],
+        );
+    }
+
+    fn render_us_futures_historical(&mut self, area: Rect, frame: &mut Frame) {
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(30), Constraint::Min(0)])
+            .split(area);
+
+        self.render_us_futures_symbol_list(h[0], frame);
+
+        let sym = self.us_futures_symbols[self.us_futures_selected];
+        let (live_price, _) = self.us_futures_live.get(sym).copied().unwrap_or((0.0, 0.0));
+
         if self.us_futures_ohlcv.is_empty() {
             frame.render_widget(
-                Paragraph::new(format!("  Loading {} OHLCV…", sym))
-                    .block(Block::default().borders(Borders::ALL).title(format!(" {} ", sym))),
+                Paragraph::new(format!("  Loading {} OHLCV… [r] refresh", sym))
+                    .block(Block::default().borders(Borders::ALL).title(format!(" {} Historical ", sym))),
                 h[1],
             );
             return;
         }
 
         let ohlcv = &self.us_futures_ohlcv;
-        let points: Vec<(f64, f64)> = ohlcv.iter().enumerate()
-            .map(|(i, r)| (i as f64, r.close)).collect();
+        let points: Vec<(f64, f64)> = ohlcv.iter().enumerate().map(|(i, r)| (i as f64, r.close)).collect();
         let prices: Vec<f64> = ohlcv.iter().map(|r| r.close).collect();
         let min = prices.iter().cloned().fold(f64::MAX, f64::min);
         let max = prices.iter().cloned().fold(f64::MIN, f64::max);
         let pad = (max - min) * 0.05 + 0.01;
         let n = points.len() as f64;
         let color = if prices.last().unwrap_or(&0.0) >= prices.first().unwrap_or(&0.0) { Color::Green } else { Color::Red };
-
-        // Live price overlay
-        let (live_price, _) = self.us_futures_live.get(sym).copied().unwrap_or((0.0, 0.0));
         let live_str = if live_price > 0.0 { format!("  Live: {:.2}", live_price) } else { String::new() };
 
-        let tz = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // ET
+        let tz = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
         let x_labels: Vec<Span> = if ohlcv.len() >= 2 {
             let mid = ohlcv.len() / 2;
             vec![
@@ -3379,7 +3478,8 @@ impl TradingApp {
             InputMode::Normal => {
                 let hint = match self.active_tab {
                     ExchangeTab::Options => "[↑↓] scroll  [Tab] calls/puts  [c] calculator  [r] refresh  [←→] prev/next tab  [q] quit",
-                    ExchangeTab::Futures => "[←→] switch contract  [↑↓] scroll ticks  [r] refresh  [1-5] switch tab  [q] quit",
+                    ExchangeTab::Futures   => "[←→] switch contract  [↑↓] scroll ticks  [r] refresh  [1-5] switch tab  [q] quit",
+                    ExchangeTab::UsFutures => "[↑↓] select symbol  [s] real-time/historical  [r] refresh  [Tab] next tab  [q] quit",
                     ExchangeTab::News    => "[↑↓] scroll  [Enter] open article  [r] refresh  [1-5] switch tab  [q] quit",
                     _ => match (self.active_tab, active_subtab) {
                         (ExchangeTab::Merval, SubTab::Historical) =>
