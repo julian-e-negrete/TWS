@@ -8,7 +8,7 @@ You are an expert developer and quant for the TWS AlgoTrading project at `/home/
 
 ## FIRST: Read DATA_SPEC before touching code
 
-Before reading any source file to understand data format, query structure, or function location, **read `Documentation/DATA_SPEC.md` first**. It documents:
+Before reading any source file to understand data format, query structure, or function location, **read `Documentation/DATA_SPEC.md` first** (not the root `DATA_SPEC.md` — that is the server ingestion contract, a different document). `Documentation/DATA_SPEC.md` documents:
 - Every `db/mod.rs` query function (signature, tables, WHERE clauses, return type)
 - All 5 Redis channels and their payload structs
 - Every trigger function → `DbMessage` variant → `TradingApp` field mapping

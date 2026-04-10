@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Document | When to use |
 |----------|-------------|
-| `Documentation/DATA_SPEC.md` | Before reading any source file to understand data format, query structure, function location, or trigger→field mapping. Covers every db/mod.rs function, all Redis channels, all MCP tools, and a new-source guide. |
+| `Documentation/DATA_SPEC.md` | **Primary reference.** Before reading any source file to understand data format, query structure, function location, or trigger→field mapping. Covers every db/mod.rs function, all Redis channels, all MCP tools, and a new-source guide. Note: the root `DATA_SPEC.md` is a *different* file — the server-side ingestion contract. Always use the one in `Documentation/`. |
 | `Documentation/ARCHITECTURE.md` | Full Rust TUI module audit — authoritative for module structure. |
 | `Documentation/SPEC.md` | Tab specs, key bindings, data contracts. |
 | `Documentation/DATA_INVENTORY.md` | Live DB/Redis inventory: row counts, schemas, date ranges. |

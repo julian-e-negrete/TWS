@@ -1,4 +1,8 @@
 # DATA_SPEC.md — Contrato de Datos para Sistemas Consumidores
+
+> **TUI data layer (db/mod.rs functions, Redis channels, trigger→field mapping, MCP tools):**
+> see [`Documentation/DATA_SPEC.md`](Documentation/DATA_SPEC.md)
+
 > Fuente de verdad para cualquier agente o sistema que lea datos de este servidor.
 > Los datos son producidos por el servidor de ingesta (`github.com/julian-e-negrete/server`).
 
@@ -9,7 +13,7 @@
 | Parámetro | Valor |
 |-----------|-------|
 | Motor | PostgreSQL 12 + TimescaleDB 2.11.2 |
-| Host | `localhost` (mismo servidor) |
+| Host | `100.112.16.115` (scrapper server) |
 | Puerto | `5432` |
 | Base de datos | `marketdata` |
 | Usuario | `postgres` |
@@ -18,7 +22,7 @@
 ```python
 import psycopg2, os
 conn = psycopg2.connect(
-    host="localhost", port=5432, dbname="marketdata",
+    host="100.112.16.115", port=5432, dbname="marketdata",
     user="postgres", password=os.environ["PG_PASSWORD"], sslmode="disable"
 )
 ```
@@ -285,118 +289,6 @@ ORDER BY vol_usd DESC;
 
 ---
 
-## 3. Datos de Precios Retail
-
-> Estas tablas contienen datos de catálogo y precios de supermercados argentinos. **No son datos financieros de mercado.** Se actualizan periódicamente mediante scrapers REST independientes y no tienen relación con los instrumentos financieros de §2.
-
-### 3.1 `carrefour_products` — Catálogo y precios Carrefour Argentina (P8)
-
-**Tipo:** Tabla regular PostgreSQL (no hypertable). Upsert por `(product_id, sku_id)` — cada ejecución refresca precios en lugar de acumular filas.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| `product_id` | `VARCHAR(50) NOT NULL` | ID de producto VTEX |
-| `sku_id` | `VARCHAR(50) NOT NULL` | ID de SKU VTEX (variante del producto) |
-| `name` | `TEXT NOT NULL` | Nombre completo del producto |
-| `brand` | `TEXT` | Marca |
-| `category` | `TEXT` | Última categoría del path (ej: `Verduras`, `Arroz`) |
-| `price` | `NUMERIC(18,2)` | Precio de venta actual (ARS) |
-| `list_price` | `NUMERIC(18,2)` | Precio de lista / sin descuento (ARS) |
-| `available` | `BOOLEAN` | `true` si `AvailableQuantity > 0` |
-| `scraped_at` | `TIMESTAMPTZ NOT NULL` | Timestamp de la última actualización (UTC) |
-| PRIMARY KEY | `(product_id, sku_id)` | |
-
-**Fuente:** API pública VTEX de Carrefour Argentina — `https://www.carrefour.com.ar/api/catalog_system/pub/products/search?_from=N&_to=M`. Sin autenticación. Paginación de 50 productos por request.
-
-**Cobertura actual:**
-
-| Métrica | Valor |
-|---------|-------|
-| SKUs | ~50 (primera página — scraper ejecutado manualmente) |
-| Productos distintos | ~50 |
-| Categorías | ~28 |
-| Última ejecución | 2026-03-31 |
-
-> El catálogo completo de Carrefour tiene miles de productos. Con ejecuciones periódicas el total crece. Ver §4 para programar la ingesta.
-
-**Queries de ejemplo:**
-
-```sql
--- Todos los productos disponibles con descuento activo
-SELECT name, brand, category, price, list_price,
-       round((1 - price / list_price) * 100, 1) AS descuento_pct
-FROM carrefour_products
-WHERE available = true AND list_price > price
-ORDER BY descuento_pct DESC;
-
--- Precio promedio por categoría
-SELECT category, count(*) AS skus, round(avg(price), 2) AS avg_price
-FROM carrefour_products
-GROUP BY category ORDER BY avg_price DESC;
-
--- Buscar producto por nombre
-SELECT name, brand, price, list_price, available
-FROM carrefour_products
-WHERE name ILIKE '%leche%'
-ORDER BY price;
-
--- Cuándo fue el último scrape
-SELECT max(scraped_at) AS ultimo_scrape FROM carrefour_products;
-```
-
-**Notas para el consumidor:**
-- `price` puede ser `NULL` si el producto no tiene precio publicado en VTEX.
-- `category` es el último segmento del path de categorías VTEX (puede ser `NULL` si el producto no tiene categoría asignada).
-- Un mismo `product_id` puede tener múltiples `sku_id` (distintas presentaciones, tamaños, etc.).
-- `list_price = price` significa que no hay descuento activo.
-
----
-
-### 3.2 `coto_products` — Catálogo y precios Coto Digital (P9)
-
-**Tipo:** Tabla regular PostgreSQL. Upsert por `(product_id, sku_id)`.
-
-| Columna | Tipo | Descripción |
-|---------|------|-------------|
-| `product_id` | `VARCHAR(50) NOT NULL` | ID de producto Endeca (ej: `prod00070699`) |
-| `sku_id` | `VARCHAR(50) NOT NULL` | ID de SKU Endeca (ej: `sku00070699`) |
-| `name` | `TEXT NOT NULL` | Nombre completo del producto |
-| `brand` | `TEXT` | Marca |
-| `category` | `TEXT` | Categoría hoja (ej: `Atún`, `Arroz`) |
-| `price` | `NUMERIC(18,2)` | Precio de venta actual (ARS) — `sku.activePrice` |
-| `list_price` | `NUMERIC(18,2)` | Precio de lista (ARS) — `sku.dtoPrice.precioLista` o `sku.referencePrice` |
-| `promo` | `TEXT` | Texto de promoción activa (ej: `80% 2da`) — `product.dtoDescuentos[0].textoDescuento` |
-| `available` | `BOOLEAN` | Siempre `true` (la API solo devuelve productos disponibles) |
-| `scraped_at` | `TIMESTAMPTZ NOT NULL` | Timestamp de la última actualización (UTC) |
-| PRIMARY KEY | `(product_id, sku_id)` | |
-
-**Fuente:** API Endeca de Coto Digital — `https://www.cotodigital.com.ar/sitios/cdigi/categoria/_/N-1nx2iz5?format=json&pushSite=CotoDigital&No=N&Nrpp=20`. Sin autenticación. Paginación de 20 productos por request. Catálogo total: ~6.500 productos.
-
-**Queries de ejemplo:**
-
-```sql
--- Productos con promoción activa
-SELECT name, brand, category, price, list_price, promo
-FROM coto_products
-WHERE promo IS NOT NULL
-ORDER BY category, name;
-
--- Comparar precio Coto vs Carrefour para productos similares
-SELECT c.name AS coto, c.price AS coto_price,
-       k.name AS carrefour, k.price AS carrefour_price
-FROM coto_products c
-JOIN carrefour_products k ON lower(c.brand) = lower(k.brand)
-                          AND lower(c.category) = lower(k.category)
-ORDER BY c.category;
-
--- Precio promedio por categoría
-SELECT category, count(*) AS skus, round(avg(price),2) AS avg_price
-FROM coto_products
-GROUP BY category ORDER BY skus DESC;
-```
-
----
-
 ## 4. Nomenclatura de Instrumentos
 
 ### Prefijo `M:bm_MERV_` — Acciones y bonos BYMA (mercado continuo)
@@ -439,8 +331,6 @@ Formato: `M:rx_DDF_DLR_<MES><AÑO>` — contrato mensual de dólar futuro.
 | Matriz órdenes (`orders`) | 10:00–16:59 | Lun–Vie | crontab cada 2 min |
 | Binance (`binance_ticks`, `binance_trades`) | 10:00–17:00 | Lun–Vie | `binance_monitor.service` (WebSocket) |
 | Solana DEX (`solana_dex_trades`) | 24/7 | Todos | crontab cada 1 min |
-| Carrefour (`carrefour_products`) | Sin restricción | Todos | crontab 07:00 ART diario |
-| Coto Digital (`coto_products`) | Sin restricción | Todos | `scrapers/coto/run.py` (manual / a programar) |
 
 > Fuera de horario, las tablas no reciben nuevos datos pero son consultables normalmente.
 
