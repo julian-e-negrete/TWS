@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Reference Documents (read these before source files)
+
+| Document | When to use |
+|----------|-------------|
+| `Documentation/DATA_SPEC.md` | Before reading any source file to understand data format, query structure, function location, or trigger→field mapping. Covers every db/mod.rs function, all Redis channels, all MCP tools, and a new-source guide. |
+| `Documentation/ARCHITECTURE.md` | Full Rust TUI module audit — authoritative for module structure. |
+| `Documentation/SPEC.md` | Tab specs, key bindings, data contracts. |
+| `Documentation/DATA_INVENTORY.md` | Live DB/Redis inventory: row counts, schemas, date ranges. |
+
 ## Project Overview
 
 TWS is a terminal trading workstation for Argentine and cryptocurrency markets. It combines a **Rust TUI frontend** (Ratatui + Tokio) with a **Python data pipeline backend**. The app is read-only — research and visualization, not order execution.

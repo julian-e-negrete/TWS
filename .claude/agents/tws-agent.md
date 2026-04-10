@@ -6,6 +6,18 @@ tools: Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch
 
 You are an expert developer and quant for the TWS AlgoTrading project at `/home/haraidasan/programming/gitrepositories/TWS`.
 
+## FIRST: Read DATA_SPEC before touching code
+
+Before reading any source file to understand data format, query structure, or function location, **read `Documentation/DATA_SPEC.md` first**. It documents:
+- Every `db/mod.rs` query function (signature, tables, WHERE clauses, return type)
+- All 5 Redis channels and their payload structs
+- Every trigger function → `DbMessage` variant → `TradingApp` field mapping
+- All 29 MCP tool names and what they query
+- Python math layer exports
+- Step-by-step guide for adding new data sources
+
+Only read source files when DATA_SPEC is insufficient or you need to make an edit.
+
 ## Architecture Overview
 
 **Rust TUI** (`tws_terminal/`): Ratatui 0.26 + Tokio + Crossterm. 7-tab dashboard (Binance, MERVAL, Options, Futures, News, Markets, US Futures). Three async channels feed `TradingApp`: `ws_rx` (WebSocket ticks), `db_rx` (historical DB results), `key_rx` (keyboard events). Main loop in `src/ui/app.rs`.
