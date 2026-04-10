@@ -1,0 +1,96 @@
+name: Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: tws-terminal-linux-x86_64
+            binary: tws-terminal
+
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: tws-terminal-windows-x86_64
+            binary: tws-terminal.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tws_terminal/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('tws_terminal/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        working-directory: tws_terminal
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          cp tws_terminal/target/${{ matrix.target }}/release/${{ matrix.binary }} ${{ matrix.artifact }}
+          strip ${{ matrix.artifact }}
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          copy tws_terminal\target\${{ matrix.target }}\release\${{ matrix.binary }} ${{ matrix.artifact }}.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}*
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            ## TWS Terminal
+
+            Pre-built binaries for Linux and Windows. No build required.
+
+            ### Usage
+            1. Copy your `.env` file to the same directory as the binary.
+            2. Run `./tws-terminal-linux-x86_64` (Linux) or `tws-terminal-windows-x86_64.exe` (Windows).
+
+            ### Requirements
+            - Network access to PostgreSQL at the host configured in `.env`
+            - Network access to Redis at the host configured in `.env`
