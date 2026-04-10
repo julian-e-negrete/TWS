@@ -7,6 +7,60 @@ pub mod order;
 pub use tick::Tick;
 pub use order::Order;
 
+// ─── Per-instrument MERVAL live state ─────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+pub struct MervalLiveInstrument {
+    pub last_price: f64,
+    pub bid_price:  f64,
+    pub ask_price:  f64,
+    pub high:       f64,
+    pub low:        f64,
+    pub prev_close: f64,
+    pub change_pct: f64,
+    /// Scaled (×100) price history for the sparkline widget
+    pub sparkline:  Vec<u64>,
+    pub last_update: String,
+}
+
+impl MervalLiveInstrument {
+    pub fn new() -> Self {
+        Self {
+            last_price: 0.0,
+            bid_price:  0.0,
+            ask_price:  0.0,
+            high:       0.0,
+            low:        0.0,
+            prev_close: 0.0,
+            change_pct: 0.0,
+            sparkline:  Vec::new(),
+            last_update: "--".to_string(),
+        }
+    }
+
+    pub fn update(&mut self, last: f64, bid: f64, ask: f64, high: f64, low: f64, prev_close: f64) {
+        if last > 0.0        { self.last_price = last; }
+        if bid  > 0.0        { self.bid_price  = bid;  }
+        if ask  > 0.0        { self.ask_price  = ask;  }
+        if high > 0.0        { self.high       = high; }
+        if low  > 0.0        { self.low        = low;  }
+        if prev_close > 0.0  { self.prev_close = prev_close; }
+
+        if self.prev_close > 0.0 && self.last_price > 0.0 {
+            self.change_pct = (self.last_price - self.prev_close) / self.prev_close * 100.0;
+        }
+
+        if self.last_price > 0.0 {
+            self.sparkline.push((self.last_price * 100.0) as u64);
+            if self.sparkline.len() > 100 {
+                self.sparkline.remove(0);
+            }
+        }
+
+        self.last_update = Local::now().format("%H:%M:%S").to_string();
+    }
+}
+
 // ─── Binance per-symbol state ──────────────────────────────────────────────
 
 #[derive(Clone)]

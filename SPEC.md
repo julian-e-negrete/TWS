@@ -1,7 +1,7 @@
 # SPEC.md — TWS Trader Workstation Technical Specification
 
 > Permanent anchor document. All agents and contributors must treat this as the source of truth.
-> Last updated: 2026-04-04
+> Last updated: 2026-04-10
 
 ---
 
@@ -16,8 +16,8 @@ A high-performance terminal for Argentine and crypto markets, inspired by Intera
 ```
 ┌─────────────────────────────────────────────────────┐
 │                  tws_terminal (Rust)                │
-│  Ratatui TUI — 5 tabs: Binance, MERVAL, Options,   │
-│  Futures, News                                      │
+│  Ratatui TUI — 7 tabs: Binance, MERVAL, Options,   │
+│  Futures, News, Markets, US Futures                 │
 │  ├── src/ui/app.rs      — app state + render        │
 │  ├── src/db/mod.rs      — PostgreSQL queries        │
 │  ├── src/network/       — Redis WebSocket           │
@@ -47,11 +47,13 @@ A high-performance terminal for Argentine and crypto markets, inspired by Intera
 
 | # | Tab | Key | Data Source |
 |---|-----|-----|-------------|
-| 1 | Binance | `1` | Redis WebSocket (live) + `binance_ticks` / `binance_trades` (historical) |
-| 2 | MERVAL | `2` | Redis WebSocket (live) + `ticks` / `orders` (historical) |
-| 3 | Options | `3` | `ticks` WHERE instrument LIKE `%GFGC%` OR `%GFGV%` |
-| 4 | Futures | `4` | `ticks` WHERE instrument LIKE `%DDF_DLR%` (last 3 contracts) |
-| 5 | News | `5` | ByMA REST API + NewsAPI (Reuters) |
+| 1 | Binance | `1` | Redis `binance:ticks` / `binance:trades` (live) + `binance_ticks` / `binance_trades` (historical) |
+| 2 | MERVAL | `2` | Redis `matriz:ticks` / `matriz:orders` (live, per-instrument) + `ticks` / `orders` (historical) |
+| 3 | Options | `3` | `ticks` WHERE instrument LIKE `%GFGC%` OR `%GFGV%` + Black-Scholes IV + Greeks |
+| 4 | Futures | `4` | `ticks` WHERE instrument LIKE `%DDF_DLR%` (last 3 contracts, dynamic) |
+| 5 | News | `5` | ByMA REST API + NewsAPI + Yahoo Finance RSS — cached in Redis `news:cache` (30 min TTL) |
+| 6 | Markets | `6` | `us_futures_ticks` + `us_futures_ohlcv` — live prices per region |
+| 7 | US Futures | `7` | `us_futures_ticks` (live) + `us_futures_ohlcv` (OHLCV chart) |
 
 ### 3.2 MERVAL Historical Sub-tabs
 
@@ -66,7 +68,7 @@ A high-performance terminal for Argentine and crypto markets, inspired by Intera
 
 | Key | Context | Action |
 |-----|---------|--------|
-| `1-5` | Global | Switch main tab |
+| `1-7` | Global | Switch main tab directly |
 | `Tab` / `→` | Global | Next tab (cycles) |
 | `←` | Global | Previous tab |
 | `q` | Global | Quit |
@@ -74,7 +76,7 @@ A high-performance terminal for Argentine and crypto markets, inspired by Intera
 | `f` | Historical | Open filter editor (date + instrument dropdown) |
 | `r` | Options / Futures / News | Refresh data |
 | `c` | Options | Toggle BS calculator panel |
-| `Enter` | Options | Load chain for selected underlying |
+| `Enter` | Options / News | Load chain for selected underlying / open article URL |
 | `↑↓` | All | Scroll / navigate |
 | `←→` | Futures / Favorites | Switch contract / navigate list |
 | `p` | Historical | Switch focus between top/bottom panel |
@@ -120,6 +122,26 @@ A high-performance terminal for Argentine and crypto markets, inspired by Intera
 | `price`, `qty` | NUMERIC(18,6) | |
 | `is_buyer_maker` | BOOLEAN | true = sell aggression |
 | `trade_id` | BIGINT | |
+
+#### `us_futures_ticks`
+| Column | Type | Notes |
+|--------|------|-------|
+| `time` | TIMESTAMPTZ | UTC |
+| `symbol` | TEXT | e.g. `ES=F`, `^GSPC`, `EURUSD=X` |
+| `last_price` | NUMERIC | |
+| `last_volume` | BIGINT | |
+| `region` | TEXT | `usa`, `europe`, `asia`, `argentina`, `brazil` (nullable) |
+| `asset_class` | TEXT | `indices`, `futures`, `fx` (nullable) |
+
+#### `us_futures_ohlcv`
+| Column | Type | Notes |
+|--------|------|-------|
+| `time` | TIMESTAMPTZ | UTC |
+| `symbol` | TEXT | |
+| `open`, `high`, `low`, `close` | NUMERIC | |
+| `volume` | BIGINT | |
+| `region` | TEXT | (nullable) |
+| `asset_class` | TEXT | (nullable) |
 
 ### 4.2 Query Rules
 - All timestamps UTC; convert to ART with `AT TIME ZONE 'America/Argentina/Buenos_Aires'`
@@ -191,7 +213,11 @@ Instrument suffix `OCT25`, `MAR26`, etc. → last calendar day of that month →
 - Key stored in `.env` as `NEWSAPI_KEY`
 - Fields used: `publishedAt`, `title`
 
-Both sources fetched in parallel on tab switch or `[r]`. Results merged and sorted by time descending.
+All three sources fetched in parallel on tab switch or `[r]`. Results merged, deduplicated by headline, and sorted by time descending.
+
+### 6.3 Redis Cache
+
+News is cached in Redis under key `news:cache` (JSON array of `NewsItem`) with a 30-minute TTL. On subsequent opens the cached result is served instantly without hitting external APIs. Cache is invalidated by TTL or manually via `DEL news:cache`.
 
 ---
 
@@ -244,15 +270,22 @@ def strategy(
 ```
 tws_terminal/src/
 ├── main.rs              — tokio runtime, channel wiring, event loop
+│                          establishes shared Arc<Client> at startup
 ├── ui/app.rs            — TradingApp state, render, input handling
-├── db/mod.rs            — all PostgreSQL queries
+│                          db_client: Option<Arc<Client>> shared across triggers
+├── db/mod.rs            — all PostgreSQL queries (time-bounded to prevent full scans)
+│                          connect_arc() returns Arc<Client>
+│                          fetch_markets_live() for Markets tab
 ├── network/
 │   ├── mod.rs           — message types, deserializers
-│   └── websocket.rs     — Redis subscriber
+│   └── websocket.rs     — Redis subscriber (5 channels)
 └── data/
-    ├── mod.rs           — BinanceSymbolData, ExchangeData, RecentTrade
+    ├── mod.rs           — BinanceSymbolData, ExchangeData, MervalLiveInstrument, RecentTrade
     ├── tick.rs          — Tick struct
     └── order.rs         — Order struct
+
+mcp_server/server.py     — FastMCP server, 34 tools (DB + analytics + Redis)
+.mcp.json                — Claude Code project-scoped MCP registration
 
 math/
 ├── options.py           — Black-Scholes, implied_volatility
@@ -267,15 +300,25 @@ data/
 └── aggregator.py        — OHLCV aggregation helpers
 
 scrapers/
-├── matriz/run.py        — Matriz WebSocket → ticks table
+├── matriz/run.py        — Matriz WebSocket → ticks table + Redis matriz:ticks
 ├── byma/run.py          — BYMA REST → CEDEARs
 ├── mae/run.py           — MAE REST → Dólar MEP
-└── BINANCE/run.py       — Binance WebSocket → binance_ticks/trades
+└── BINANCE/run.py       — Binance WebSocket → binance_ticks/trades + Redis binance:ticks
 ```
 
 ---
 
-## 10. Validation Checklist (before production)
+## 10. Performance Notes
+
+- **Shared DB connection**: `Arc<tokio_postgres::Client>` established at startup in `main.rs`, stored in `TradingApp.db_client`. All trigger functions reuse it, falling back to `connect()` if None. Eliminates per-action TCP + Postgres handshake (~100–200 ms).
+- **Concurrent queries**: `trigger_historical_fetch` uses `tokio::join!` to pipeline all 4 table queries on one connection.
+- **Time bounds on all queries**: every query is scoped to a recent interval (`2 days` for live data, `7 days` for distinct instruments) to avoid full scans on 14M+ row hypertables.
+- **News Redis cache**: `news:cache` key with 30 min TTL — avoids 3 external API calls on every tab open.
+- **Markets tab**: populated from `us_futures_ticks` + `us_futures_ohlcv` on tab switch, keyed by symbol in `HashMap<String, MarketRow>`.
+
+---
+
+## 11. Validation Checklist (before production)
 
 - [ ] Strategy tested on ≥ 3 contracts
 - [ ] Win rate > 40% out-of-sample

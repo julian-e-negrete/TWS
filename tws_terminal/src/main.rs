@@ -56,6 +56,12 @@ async fn main() -> Result<()> {
     let mut app = TradingApp::new();
     app.db_tx = Some(db_tx);
 
+    // Establish a persistent shared Postgres connection (reused by all trigger functions)
+    match crate::db::connect().await {
+        Ok(client) => { app.db_client = Some(std::sync::Arc::new(client)); }
+        Err(e) => { eprintln!("Warning: initial DB connection failed — will retry per query: {e}"); }
+    }
+
     // ── Render ticker: redraw at ~30 fps regardless of events ─────────────────
     let mut render_interval = time::interval(time::Duration::from_millis(33));
 

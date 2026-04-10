@@ -1,14 +1,14 @@
 {
   "mcpServers": {
     "tws-algotrading": {
+      "type": "stdio",
       "command": "/home/haraidasan/programming/gitrepositories/TWS/.venv/bin/python3",
       "args": [
         "/home/haraidasan/programming/gitrepositories/TWS/mcp_server/server.py"
       ],
       "env": {
         "PYTHONPATH": "/home/haraidasan/programming/gitrepositories/TWS"
-      },
-      "description": "TWS AlgoTrading — PostgreSQL/TimescaleDB + Redis + options pricing + CCL/DLR analytics"
+      }
     }
   }
 }

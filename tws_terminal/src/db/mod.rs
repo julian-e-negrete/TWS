@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, NaiveDate, Utc};
+use std::sync::Arc;
 use tokio_postgres::{Client, NoTls};
 
 // ─── Filter params ────────────────────────────────────────────────────────────
@@ -53,6 +54,10 @@ pub struct HistBinanceTrade {
 
 // ─── Connection ───────────────────────────────────────────────────────────────
 
+pub async fn connect_arc() -> Result<Arc<Client>> {
+    Ok(Arc::new(connect().await?))
+}
+
 pub async fn connect() -> Result<Client> {
     let host = std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "100.112.16.115".into());
     let port = std::env::var("POSTGRES_PORT").unwrap_or_else(|_| "5432".into());
@@ -77,6 +82,7 @@ pub async fn fetch_ticks(client: &Client, limit: i64, f: &HistFilter) -> Result<
              FROM ticks \
              WHERE ($1::date IS NULL OR time::date = $1) \
                AND ($2::text IS NULL OR LOWER(instrument) LIKE $2) \
+               AND ($1::date IS NOT NULL OR time > NOW() - INTERVAL '2 days') \
              ORDER BY time DESC LIMIT $3",
             &[&f.date, &instr, &limit],
         )
@@ -100,6 +106,7 @@ pub async fn fetch_orders(client: &Client, limit: i64, f: &HistFilter) -> Result
              FROM orders \
              WHERE ($1::date IS NULL OR time::date = $1) \
                AND ($2::text IS NULL OR LOWER(instrument) LIKE $2) \
+               AND ($1::date IS NOT NULL OR time > NOW() - INTERVAL '2 days') \
              ORDER BY time DESC LIMIT $3",
             &[&f.date, &instr, &limit],
         )
@@ -126,6 +133,7 @@ pub async fn fetch_binance_ticks(client: &Client, limit: i64, f: &HistFilter) ->
              FROM binance_ticks \
              WHERE ($1::date IS NULL OR timestamp::date = $1) \
                AND ($2::text IS NULL OR UPPER(symbol) LIKE $2) \
+               AND ($1::date IS NOT NULL OR timestamp > NOW() - INTERVAL '2 days') \
              ORDER BY timestamp DESC LIMIT $3",
             &[&f.date, &sym, &limit],
         )
@@ -150,6 +158,7 @@ pub async fn fetch_binance_trades(client: &Client, limit: i64, f: &HistFilter) -
              FROM binance_trades \
              WHERE ($1::date IS NULL OR time::date = $1) \
                AND ($2::text IS NULL OR UPPER(symbol) LIKE $2) \
+               AND ($1::date IS NOT NULL OR time > NOW() - INTERVAL '2 days') \
              ORDER BY time DESC LIMIT $3",
             &[&f.date, &sym, &limit],
         )
@@ -183,8 +192,21 @@ pub async fn fetch_binance_price_history(client: &Client, symbol: &str, hours: i
 
 pub async fn fetch_distinct_instruments(client: &Client) -> Result<Vec<String>> {
     let rows = client.query(
-        "SELECT DISTINCT instrument FROM ticks ORDER BY instrument", &[]
+        "SELECT DISTINCT instrument FROM ticks
+         WHERE time > NOW() - INTERVAL '7 days'
+         ORDER BY instrument",
+        &[],
     ).await?;
+    if rows.is_empty() {
+        // Holiday / weekend fallback
+        let rows2 = client.query(
+            "SELECT DISTINCT instrument FROM ticks
+             WHERE time > NOW() - INTERVAL '30 days'
+             ORDER BY instrument",
+            &[],
+        ).await?;
+        return Ok(rows2.iter().map(|r| r.get::<_, String>(0)).collect());
+    }
     Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
 }
 
@@ -192,8 +214,10 @@ pub async fn fetch_distinct_dates(client: &Client) -> Result<Vec<String>> {
     let rows = client.query(
         "SELECT DISTINCT d FROM (
             SELECT time::date::text AS d FROM ticks
+              WHERE time > NOW() - INTERVAL '90 days'
             UNION
             SELECT timestamp::date::text FROM binance_ticks
+              WHERE timestamp > NOW() - INTERVAL '90 days'
          ) t ORDER BY 1 DESC LIMIT 90",
         &[],
     ).await?;
@@ -202,7 +226,10 @@ pub async fn fetch_distinct_dates(client: &Client) -> Result<Vec<String>> {
 
 pub async fn fetch_distinct_binance_symbols(client: &Client) -> Result<Vec<String>> {
     let rows = client.query(
-        "SELECT DISTINCT symbol FROM binance_ticks ORDER BY symbol", &[]
+        "SELECT DISTINCT symbol FROM binance_ticks
+         WHERE timestamp > NOW() - INTERVAL '7 days'
+         ORDER BY symbol",
+        &[],
     ).await?;
     Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
 }
@@ -303,7 +330,8 @@ pub async fn fetch_futures_curve(client: &Client) -> Result<Vec<FuturesRow>> {
          WHERE instrument LIKE 'M:%DDF_DLR%'
            AND instrument NOT LIKE '%A'
            AND time > NOW() - INTERVAL '30 days'
-         ORDER BY instrument, time DESC",
+         ORDER BY instrument, time DESC
+         LIMIT 6",
         &[],
     ).await?;
 
@@ -356,7 +384,8 @@ pub async fn fetch_distinct_merval_instruments(client: &Client, _days: i64) -> R
         "SELECT DISTINCT instrument FROM ticks
          WHERE instrument NOT LIKE '%DDF_DLR%'
            AND time > NOW() - INTERVAL '7 days'
-         ORDER BY instrument",
+         ORDER BY instrument
+         LIMIT 300",
         &[],
     ).await?;
     // If nothing in last 7 days (holiday), try 30 days
@@ -365,7 +394,8 @@ pub async fn fetch_distinct_merval_instruments(client: &Client, _days: i64) -> R
             "SELECT DISTINCT instrument FROM ticks
              WHERE instrument NOT LIKE '%DDF_DLR%'
                AND time > NOW() - INTERVAL '30 days'
-             ORDER BY instrument",
+             ORDER BY instrument
+             LIMIT 300",
             &[],
         ).await?;
         return Ok(rows2.iter().map(|r| r.get::<_, String>(0)).collect());
@@ -499,4 +529,60 @@ pub async fn fetch_us_futures_last_prices(client: &Client) -> Result<Vec<(String
         &[],
     ).await?;
     Ok(rows.iter().map(|r| (r.get::<_, String>(0), r.get::<_, f64>(1))).collect())
+}
+
+// ─── Markets tab ──────────────────────────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+pub struct MarketRow {
+    pub symbol:      String,
+    pub last_price:  f64,
+    pub change_pct:  f64,
+    pub region:      String,
+    pub asset_class: String,
+}
+
+pub async fn fetch_markets_live(client: &Client) -> Result<Vec<MarketRow>> {
+    // Latest price per symbol from us_futures_ticks
+    let price_rows = client.query(
+        "SELECT DISTINCT ON (symbol) symbol, last_price::float8, region, asset_class
+         FROM us_futures_ticks
+         WHERE time > NOW() - INTERVAL '2 days'
+         ORDER BY symbol, time DESC",
+        &[],
+    ).await?;
+
+    // Daily change % from us_futures_ohlcv
+    let chg_rows = client.query(
+        "SELECT DISTINCT ON (symbol) symbol,
+                (CASE WHEN open > 0 THEN (close - open) / open * 100.0 ELSE 0 END)::float8 AS chg_pct
+         FROM us_futures_ohlcv
+         WHERE time > NOW() - INTERVAL '2 days'
+         ORDER BY symbol, time DESC",
+        &[],
+    ).await?;
+
+    let mut chg_map: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for r in &chg_rows {
+        let sym: String = r.get(0);
+        let chg: f64    = r.get(1);
+        chg_map.insert(sym, chg);
+    }
+
+    let rows = price_rows.iter().map(|r| {
+        let symbol:      String         = r.get(0);
+        let last_price:  f64            = r.get(1);
+        let region:      Option<String> = r.get(2);
+        let asset_class: Option<String> = r.get(3);
+        let change_pct = chg_map.get(&symbol).copied().unwrap_or(0.0);
+        MarketRow {
+            symbol,
+            last_price,
+            change_pct,
+            region:      region.unwrap_or_default(),
+            asset_class: asset_class.unwrap_or_default(),
+        }
+    }).collect();
+
+    Ok(rows)
 }

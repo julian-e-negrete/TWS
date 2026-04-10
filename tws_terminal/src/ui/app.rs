@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -9,8 +10,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::data::{BinanceSymbolData, ExchangeData, Order, RecentTrade};
-use crate::db::{FuturesRow, HistBinanceTick, HistBinanceTrade, HistFilter, HistOrder, HistTick, OptionRow};
+use crate::data::{BinanceSymbolData, ExchangeData, MervalLiveInstrument, Order, RecentTrade};
+use crate::db::{FuturesRow, HistBinanceTick, HistBinanceTrade, HistFilter, HistOrder, HistTick, MarketRow, OptionRow};
 use crate::network::WebSocketMessage;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -173,7 +174,7 @@ impl FilterState {
 
 // ─── News item ────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct NewsItem {
     pub time:        String,
     pub source:      String,
@@ -202,6 +203,7 @@ pub enum DbMessage {
     MervalInstrumentOrders(Vec<HistOrder>),
     News(Vec<NewsItem>),
     UsFuturesOhlcv(Vec<crate::db::UsFuturesOhlcv>),
+    MarketsData(Vec<MarketRow>),
     Error(String),
 }
 
@@ -253,6 +255,12 @@ pub struct TradingApp {
 
     // ── MERVAL ──
     pub merval_data: ExchangeData,
+    /// Per-instrument live state, keyed by full instrument name (e.g. "M:bm_MERV_GGAL_24hs")
+    pub merval_live: HashMap<String, MervalLiveInstrument>,
+    /// Sorted instrument names for stable table order
+    pub merval_live_sorted: Vec<String>,
+    /// Scroll / highlight state for the live instruments table
+    pub merval_live_state: TableState,
 
     // ── Order management ──
     pub orders: Vec<Order>,
@@ -301,6 +309,8 @@ pub struct TradingApp {
 
     // ── DB channel sender (set by main) ──
     pub db_tx: Option<UnboundedSender<DbMessage>>,
+    /// Persistent shared Postgres connection — avoids per-trigger TCP handshake
+    pub db_client: Option<Arc<tokio_postgres::Client>>,
 
     // ── Symbols whose price history has been seeded from DB ──
     pub seeded_symbols: std::collections::HashSet<String>,
@@ -347,6 +357,9 @@ pub struct TradingApp {
     pub news_items:   Vec<NewsItem>,
     pub news_state:   ratatui::widgets::ListState,
     pub news_loading: bool,
+
+    // ── Markets tab ──
+    pub markets_data: HashMap<String, MarketRow>,
 }
 
 impl TradingApp {
@@ -360,6 +373,9 @@ impl TradingApp {
             selected_symbol: None,
             recent_trades: VecDeque::new(),
             merval_data: ExchangeData::new("MERVAL", "ARS", 0),
+            merval_live: HashMap::new(),
+            merval_live_sorted: Vec::new(),
+            merval_live_state: TableState::default(),
             orders: Vec::new(),
             orders_table_state: TableState::default(),
             selected_order_index: 0,
@@ -394,6 +410,7 @@ impl TradingApp {
             fav_orders_state: TableState::default(),
             fav_focus: HistFocus::Top,
             db_tx: None,
+            db_client: None,
             seeded_symbols: std::collections::HashSet::new(),
             filter: FilterState::new(),
             available_instruments:     Vec::new(),
@@ -426,6 +443,7 @@ impl TradingApp {
             us_futures_selected: 0,
             us_futures_ohlcv:    Vec::new(),
             us_futures_symbols:  vec!["ES=F","NQ=F","YM=F","CL=F","GC=F","SI=F","ZB=F"],
+            markets_data:        HashMap::new(),
         }
     }
 
@@ -640,11 +658,19 @@ impl TradingApp {
 
     // ─── Fetch triggers ──────────────────────────────────────────────────
 
+    /// Returns the shared Arc<Client> or creates a fresh connection.
+    /// Callers move the result into a `tokio::spawn` — it is `Send + Sync`.
+    async fn get_db_client(shared: Option<Arc<tokio_postgres::Client>>) -> Option<Arc<tokio_postgres::Client>> {
+        if let Some(c) = shared { return Some(c); }
+        crate::db::connect_arc().await.ok()
+    }
+
     fn trigger_merval_instruments_fetch(&mut self) {
         let Some(tx) = self.db_tx.clone() else { return };
+        let client = self.db_client.clone();
         tokio::spawn(async move {
-            if let Ok(client) = crate::db::connect().await {
-                if let Ok(list) = crate::db::fetch_distinct_merval_instruments(&client, 90).await {
+            if let Some(c) = Self::get_db_client(client).await {
+                if let Ok(list) = crate::db::fetch_distinct_merval_instruments(&c, 90).await {
                     let _ = tx.send(DbMessage::MervalInstruments(list));
                 }
             }
@@ -655,31 +681,27 @@ impl TradingApp {
         let Some(tx) = self.db_tx.clone() else { return };
         let instr = instrument.to_string();
         let range = self.merval_time_range;
+        let client = self.db_client.clone();
         self.merval_selected_instr = Some(instr.clone());
         self.merval_price_series.clear();
         self.merval_price_labels.clear();
         self.merval_detail_orders.clear();
         tokio::spawn(async move {
-            let (c1, c2) = tokio::join!(crate::db::connect(), crate::db::connect());
-            match (c1, c2) {
-                (Ok(client1), Ok(client2)) => {
-                    let instr2 = instr.clone();
-                    let (series_result, orders_result) = tokio::join!(
-                        crate::db::fetch_instrument_price_series_with_times(&client1, &instr, range.sql_params()),
-                        crate::db::fetch_instrument_orders(&client2, &instr2)
-                    );
-                    match series_result {
-                        Ok((series, labels)) => { let _ = tx.send(DbMessage::MervalPriceSeries(series, labels)); }
-                        Err(e) => { let _ = tx.send(DbMessage::Error(format!("price series: {e:#}"))); }
-                    }
-                    match orders_result {
-                        Ok(orders) => { let _ = tx.send(DbMessage::MervalInstrumentOrders(orders)); }
-                        Err(e) => { let _ = tx.send(DbMessage::Error(format!("orders: {e}"))); }
-                    }
-                }
-                (Err(e), _) | (_, Err(e)) => {
-                    let _ = tx.send(DbMessage::Error(format!("DB connect: {e}")));
-                }
+            let Some(c) = Self::get_db_client(client).await else {
+                let _ = tx.send(DbMessage::Error("DB connect failed".into()));
+                return;
+            };
+            let (series_result, orders_result) = tokio::join!(
+                crate::db::fetch_instrument_price_series_with_times(&c, &instr, range.sql_params()),
+                crate::db::fetch_instrument_orders(&c, &instr)
+            );
+            match series_result {
+                Ok((series, labels)) => { let _ = tx.send(DbMessage::MervalPriceSeries(series, labels)); }
+                Err(e) => { let _ = tx.send(DbMessage::Error(format!("price series: {e:#}"))); }
+            }
+            match orders_result {
+                Ok(orders) => { let _ = tx.send(DbMessage::MervalInstrumentOrders(orders)); }
+                Err(e) => { let _ = tx.send(DbMessage::Error(format!("orders: {e}"))); }
             }
         });
     }
@@ -688,26 +710,21 @@ impl TradingApp {
         let Some(tx) = self.db_tx.clone() else { return };
         if self.options_loading { return; }
         self.options_loading = true;
+        let client = self.db_client.clone();
         tokio::spawn(async move {
-            match crate::db::connect().await {
-                Ok(client) => {
-                    // Fetch GGAL spot price in parallel
-                    let tx2 = tx.clone();
-                    let client2 = match crate::db::connect().await {
-                        Ok(c) => Some(c),
-                        Err(_) => None,
-                    };
-                    if let Some(c) = client2 {
-                        if let Ok(spot) = crate::db::fetch_last_price(&c, "M:bm_MERV_GGAL_24hs").await {
-                            let _ = tx2.send(DbMessage::GgalSpot(spot));
-                        }
-                    }
-                    match crate::db::fetch_options_chain(&client).await {
-                        Ok(rows) => { let _ = tx.send(DbMessage::OptionsChain(rows)); }
-                        Err(e)   => { let _ = tx.send(DbMessage::Error(format!("{e}"))); }
-                    }
-                }
-                Err(e) => { let _ = tx.send(DbMessage::Error(format!("DB: {e}"))); }
+            let Some(c) = Self::get_db_client(client).await else {
+                let _ = tx.send(DbMessage::Error("DB connect failed".into()));
+                return;
+            };
+            // Fetch spot price and options chain concurrently on a single connection
+            let (spot_result, chain_result) = tokio::join!(
+                crate::db::fetch_last_price(&c, "M:bm_MERV_GGAL_24hs"),
+                crate::db::fetch_options_chain(&c),
+            );
+            if let Ok(spot) = spot_result { let _ = tx.send(DbMessage::GgalSpot(spot)); }
+            match chain_result {
+                Ok(rows) => { let _ = tx.send(DbMessage::OptionsChain(rows)); }
+                Err(e)   => { let _ = tx.send(DbMessage::Error(format!("{e}"))); }
             }
         });
     }
@@ -715,26 +732,26 @@ impl TradingApp {
     fn fetch_futures_ticks_for(&self, instrument: &str) {
         let Some(tx) = self.db_tx.clone() else { return };
         let instr = instrument.to_string();
+        let client = self.db_client.clone();
         tokio::spawn(async move {
-            match crate::db::connect().await {
-                Ok(client) => match crate::db::fetch_futures_ticks(&client, &instr, 200).await {
+            if let Some(c) = Self::get_db_client(client).await {
+                match crate::db::fetch_futures_ticks(&c, &instr, 200).await {
                     Ok(rows) => { let _ = tx.send(DbMessage::FuturesTicks(rows)); }
                     Err(e)   => { let _ = tx.send(DbMessage::Error(format!("{e}"))); }
-                },
-                Err(e) => { let _ = tx.send(DbMessage::Error(format!("DB: {e}"))); }
+                }
             }
         });
     }
 
     fn trigger_futures_fetch(&mut self) {
         let Some(tx) = self.db_tx.clone() else { return };
+        let client = self.db_client.clone();
         tokio::spawn(async move {
-            match crate::db::connect().await {
-                Ok(client) => match crate::db::fetch_futures_curve(&client).await {
+            if let Some(c) = Self::get_db_client(client).await {
+                match crate::db::fetch_futures_curve(&c).await {
                     Ok(rows) => { let _ = tx.send(DbMessage::FuturesCurve(rows)); }
                     Err(e)   => { let _ = tx.send(DbMessage::Error(format!("{e}"))); }
-                },
-                Err(e) => { let _ = tx.send(DbMessage::Error(format!("DB: {e}"))); }
+                }
             }
         });
     }
@@ -745,6 +762,25 @@ impl TradingApp {
         self.news_loading = true;
         let newsapi_key = std::env::var("NEWSAPI_KEY").unwrap_or_default();
         tokio::spawn(async move {
+            use redis::AsyncCommands;
+            const REDIS_URL: &str = "redis://100.112.16.115:6379";
+            const CACHE_KEY: &str = "news:cache";
+
+            // Check Redis cache first — avoids all external API calls when fresh
+            if let Ok(rclient) = redis::Client::open(REDIS_URL) {
+                if let Ok(mut conn) = rclient.get_async_connection().await {
+                    let cached: redis::RedisResult<String> = conn.get(CACHE_KEY).await;
+                    if let Ok(json_str) = cached {
+                        if let Ok(items) = serde_json::from_str::<Vec<NewsItem>>(&json_str) {
+                            if !items.is_empty() {
+                                let _ = tx.send(DbMessage::News(items));
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
             let mut items: Vec<NewsItem> = Vec::new();
 
             // ByMA relevant facts
@@ -891,6 +927,18 @@ impl TradingApp {
             items.retain(|n| seen.insert(n.headline.clone()));
 
             items.sort_by(|a, b| b.time.cmp(&a.time));
+
+            // Persist to Redis with 30-minute TTL so the next open is instant
+            if !items.is_empty() {
+                if let Ok(rclient) = redis::Client::open(REDIS_URL) {
+                    if let Ok(mut conn) = rclient.get_async_connection().await {
+                        if let Ok(json_str) = serde_json::to_string(&items) {
+                            let _: redis::RedisResult<()> = conn.set_ex(CACHE_KEY, json_str, 1800).await;
+                        }
+                    }
+                }
+            }
+
             let _ = tx.send(DbMessage::News(items));
         });
     }
@@ -939,46 +987,61 @@ impl TradingApp {
             }
             DbMessage::News(items)          => { self.news_items = items; self.news_loading = false; }
             DbMessage::UsFuturesOhlcv(rows) => { self.us_futures_ohlcv = rows; }
+            DbMessage::MarketsData(rows) => {
+                self.markets_data.clear();
+                for row in rows {
+                    self.markets_data.insert(row.symbol.clone(), row);
+                }
+            }
             DbMessage::Error(e)             => self.hist_error = Some(e),
         }
     }
 
-    /// Spawn a background task that queries all 4 tables and sends results back.
-    fn trigger_historical_fetch(&mut self) {        let Some(tx) = self.db_tx.clone() else { return };
+    /// Spawn a background task that queries all 4 tables concurrently and sends results back.
+    fn trigger_historical_fetch(&mut self) {
+        let Some(tx) = self.db_tx.clone() else { return };
         if self.hist_loading { return; }
         self.hist_loading = true;
         self.hist_error = None;
 
         let f = self.filter.filter.clone();
         let need_autocomplete = self.available_instruments.is_empty();
+        let client = self.db_client.clone();
 
         tokio::spawn(async move {
-            let client = match crate::db::connect().await {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = tx.send(DbMessage::Error(format!("DB connect: {e}")));
-                    return;
-                }
+            let Some(c) = Self::get_db_client(client).await else {
+                let _ = tx.send(DbMessage::Error("DB connect failed".into()));
+                return;
             };
 
-            macro_rules! send {
-                ($fut:expr, $variant:ident) => {
-                    match $fut.await {
-                        Ok(rows) => { let _ = tx.send(DbMessage::$variant(rows)); }
-                        Err(e)   => { let _ = tx.send(DbMessage::Error(format!("{e}"))); }
-                    }
-                };
-            }
-
-            send!(crate::db::fetch_ticks(&client, 200, &f),          Ticks);
-            send!(crate::db::fetch_orders(&client, 200, &f),         Orders);
-            send!(crate::db::fetch_binance_ticks(&client, 200, &f),  BinanceTicks);
-            send!(crate::db::fetch_binance_trades(&client, 200, &f), BinanceTrades);
+            // Run all 4 data queries concurrently — tokio_postgres pipelines them
+            let f2 = f.clone(); let f3 = f.clone(); let f4 = f.clone();
+            let (r_ticks, r_orders, r_bticks, r_btrades) = tokio::join!(
+                crate::db::fetch_ticks(&c, 200, &f),
+                crate::db::fetch_orders(&c, 200, &f2),
+                crate::db::fetch_binance_ticks(&c, 200, &f3),
+                crate::db::fetch_binance_trades(&c, 200, &f4),
+            );
+            macro_rules! fwd { ($r:expr, $v:ident) => {
+                match $r {
+                    Ok(rows) => { let _ = tx.send(DbMessage::$v(rows)); }
+                    Err(e)   => { let _ = tx.send(DbMessage::Error(format!("{e}"))); }
+                }
+            }}
+            fwd!(r_ticks,   Ticks);
+            fwd!(r_orders,  Orders);
+            fwd!(r_bticks,  BinanceTicks);
+            fwd!(r_btrades, BinanceTrades);
 
             if need_autocomplete {
-                send!(crate::db::fetch_distinct_instruments(&client),    Instruments);
-                send!(crate::db::fetch_distinct_dates(&client),          Dates);
-                send!(crate::db::fetch_distinct_binance_symbols(&client),BinanceSymbols);
+                let (ri, rd, rb) = tokio::join!(
+                    crate::db::fetch_distinct_instruments(&c),
+                    crate::db::fetch_distinct_dates(&c),
+                    crate::db::fetch_distinct_binance_symbols(&c),
+                );
+                fwd!(ri, Instruments);
+                fwd!(rd, Dates);
+                fwd!(rb, BinanceSymbols);
             }
         });
     }
@@ -995,14 +1058,15 @@ impl TradingApp {
                     .or_insert_with(|| BinanceSymbolData::new(&tick.symbol));
                 data.update(tick.open, tick.high, tick.low, tick.close, tick.volume);
 
-                // Seed historical price data on first tick for this symbol
+                // Seed historical price data on first tick for this symbol (reuses shared client)
                 if is_new && !self.seeded_symbols.contains(&tick.symbol) {
                     self.seeded_symbols.insert(tick.symbol.clone());
                     if let Some(tx) = self.db_tx.clone() {
                         let symbol = tick.symbol.clone();
+                        let client = self.db_client.clone();
                         tokio::spawn(async move {
-                            if let Ok(client) = crate::db::connect().await {
-                                if let Ok(points) = crate::db::fetch_binance_price_history(&client, &symbol, 3).await {
+                            if let Some(c) = Self::get_db_client(client).await {
+                                if let Ok(points) = crate::db::fetch_binance_price_history(&c, &symbol, 3).await {
                                     let _ = tx.send(DbMessage::BinancePriceHistory(symbol, points));
                                 }
                             }
@@ -1071,9 +1135,18 @@ impl TradingApp {
                 if hist.len() > 500 { hist.remove(0); }
             }
             WebSocketMessage::MatrizTick(tick) => {
-                // Update MERVAL live data for the matching instrument
-                if tick.last_price > 0.0 {
-                    self.merval_data.update_price(tick.last_price, 0.0);
+                let entry = self.merval_live
+                    .entry(tick.instrument.clone())
+                    .or_insert_with(MervalLiveInstrument::new);
+                entry.update(tick.last_price, tick.bid_price, tick.ask_price, tick.high, tick.low, tick.prev_close);
+
+                if !self.merval_live_sorted.contains(&tick.instrument) {
+                    self.merval_live_sorted.push(tick.instrument.clone());
+                    self.merval_live_sorted.sort();
+                    // Auto-select first row
+                    if self.merval_live_state.selected().is_none() {
+                        self.merval_live_state.select(Some(0));
+                    }
                 }
             }
             WebSocketMessage::MatrizOrder(order) => {
@@ -1232,6 +1305,7 @@ impl TradingApp {
                 }
                 crossterm::event::KeyCode::Char('6') => {
                     self.active_tab = ExchangeTab::Markets;
+                    if self.markets_data.is_empty() { self.trigger_markets_fetch(); }
                 }
                 crossterm::event::KeyCode::Char('7') => {
                     self.active_tab = ExchangeTab::UsFutures;
@@ -1341,9 +1415,9 @@ impl TradingApp {
                                         if idx > 0 { self.selected_symbol = Some(self.symbols_by_volume[idx - 1].clone()); }
                                     }
                                     ExchangeTab::Merval => {
-                                        if self.selected_order_index > 0 {
-                                            self.selected_order_index -= 1;
-                                            self.orders_table_state.select(Some(self.selected_order_index));
+                                        let cur = self.merval_live_state.selected().unwrap_or(0);
+                                        if cur > 0 {
+                                            self.merval_live_state.select(Some(cur - 1));
                                         }
                                     }
                                     _ => {}
@@ -1397,9 +1471,9 @@ impl TradingApp {
                                         }
                                     }
                                     ExchangeTab::Merval => {
-                                        if self.selected_order_index < self.orders.len().saturating_sub(1) {
-                                            self.selected_order_index += 1;
-                                            self.orders_table_state.select(Some(self.selected_order_index));
+                                        let cur = self.merval_live_state.selected().unwrap_or(0);
+                                        if cur + 1 < self.merval_live_sorted.len() {
+                                            self.merval_live_state.select(Some(cur + 1));
                                         }
                                     }
                                     _ => {}
@@ -1631,6 +1705,7 @@ impl TradingApp {
             ExchangeTab::Futures   => { if self.futures_curve.is_empty() { self.trigger_futures_fetch(); } }
             ExchangeTab::News      => { if self.news_items.is_empty() { self.trigger_news_fetch(); } }
             ExchangeTab::UsFutures => { self.trigger_us_futures_ohlcv(); }
+            ExchangeTab::Markets   => { self.trigger_markets_fetch(); }
             _ => {}
         }
     }
@@ -1638,10 +1713,23 @@ impl TradingApp {
     fn trigger_us_futures_ohlcv(&self) {
         let Some(tx) = self.db_tx.clone() else { return };
         let sym = self.us_futures_symbols[self.us_futures_selected].to_string();
+        let client = self.db_client.clone();
         tokio::spawn(async move {
-            if let Ok(client) = crate::db::connect().await {
-                if let Ok(rows) = crate::db::fetch_us_futures_ohlcv(&client, &sym, 200).await {
+            if let Some(c) = Self::get_db_client(client).await {
+                if let Ok(rows) = crate::db::fetch_us_futures_ohlcv(&c, &sym, 200).await {
                     let _ = tx.send(DbMessage::UsFuturesOhlcv(rows));
+                }
+            }
+        });
+    }
+
+    fn trigger_markets_fetch(&self) {
+        let Some(tx) = self.db_tx.clone() else { return };
+        let client = self.db_client.clone();
+        tokio::spawn(async move {
+            if let Some(c) = Self::get_db_client(client).await {
+                if let Ok(rows) = crate::db::fetch_markets_live(&c).await {
+                    let _ = tx.send(DbMessage::MarketsData(rows));
                 }
             }
         });
@@ -2863,8 +2951,7 @@ impl TradingApp {
         let weekday = now.weekday();
         let is_weekend = weekday == Weekday::Sat || weekday == Weekday::Sun;
 
-        // (name, lon, lat, open_utc, close_utc, tz_offset_hours, no_weekend)
-        // open/close in local time hours
+        // (name, lon, lat, open_h_local, close_h_local, tz_offset_hours)
         let markets: &[(&str, f64, f64, u32, u32, i32)] = &[
             ("NYSE/NASDAQ",  -74.0,  40.7,  9,  16, -5),
             ("Argentina",    -58.4, -34.6, 11,  17, -3),
@@ -2879,6 +2966,63 @@ impl TradingApp {
             ("Hong Kong",    114.2,  22.3,  9,  16,  8),
         ];
 
+        // Friendly name map for known symbols
+        let friendly_name = |sym: &str| -> String {
+            match sym {
+                "^GSPC"     => "S&P 500".into(),
+                "^NDX"      => "Nasdaq 100".into(),
+                "^DJI"      => "Dow Jones".into(),
+                "ES=F"      => "S&P Fut".into(),
+                "NQ=F"      => "NQ Fut".into(),
+                "YM=F"      => "DJ Fut".into(),
+                "RTY=F"     => "Russell Fut".into(),
+                "CL=F"      => "Crude Oil".into(),
+                "GC=F"      => "Gold".into(),
+                "SI=F"      => "Silver".into(),
+                "NG=F"      => "Nat Gas".into(),
+                "ZB=F"      => "30Y T-Bond".into(),
+                "ZN=F"      => "10Y T-Note".into(),
+                "EURUSD=X"  => "EUR/USD".into(),
+                "USDJPY=X"  => "USD/JPY".into(),
+                "GBPUSD=X"  => "GBP/USD".into(),
+                "EURGBP=X"  => "EUR/GBP".into(),
+                "EURJPY=X"  => "EUR/JPY".into(),
+                "USDCNH=X"  => "USD/CNH".into(),
+                "ARS=X"     => "USD/ARS".into(),
+                "BRL=X"     => "USD/BRL".into(),
+                "^STOXX50E" => "Euro Stoxx 50".into(),
+                "^FTSE"     => "FTSE 100".into(),
+                "^GDAXI"    => "DAX".into(),
+                "^N225"     => "Nikkei 225".into(),
+                "^HSI"      => "Hang Seng".into(),
+                "000001.SS" => "Shanghai Comp".into(),
+                "^MERV"     => "MERVAL".into(),
+                "^BVSP"     => "Bovespa".into(),
+                _           => sym.to_string(),
+            }
+        };
+
+        // Region ordering and symbols
+        let regions: &[(&str, &[&str])] = &[
+            ("USA",       &["^GSPC","^NDX","^DJI","ES=F","NQ=F","YM=F","CL=F","GC=F","SI=F","ZB=F","EURUSD=X","USDJPY=X","GBPUSD=X"]),
+            ("Europe",    &["^STOXX50E","^FTSE","^GDAXI","EURUSD=X","EURGBP=X","EURJPY=X"]),
+            ("Asia",      &["^N225","^HSI","000001.SS","USDJPY=X","USDCNH=X"]),
+            ("Argentina", &["^MERV","ARS=X"]),
+            ("Brazil",    &["^BVSP","BRL=X"]),
+        ];
+
+        // Horizontal split: left = map+hours, right = live prices
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(area);
+
+        // ── Left side: map on top, hours legend on bottom ──
+        let v_left = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(14)])
+            .split(h[0]);
+
         let canvas = Canvas::default()
             .block(Block::default().borders(Borders::ALL)
                 .title(format!(" Global Markets — {} UTC  [6] ", now.format("%H:%M"))))
@@ -2890,43 +3034,24 @@ impl TradingApp {
                     color: Color::DarkGray,
                     resolution: MapResolution::High,
                 });
-
                 for &(name, lon, lat, open_h, close_h, tz_offset) in markets {
-                    // Convert current UTC to local time for this market
                     let local_h = (now.hour() as i32 + tz_offset).rem_euclid(24) as u32;
                     let local_m = now.minute();
                     let local_time = local_h * 60 + local_m;
-                    let open_min  = open_h  * 60;
-                    let close_min = close_h * 60;
-                    let is_open = !is_weekend && local_time >= open_min && local_time < close_min;
-
-                    let (color, status) = if is_open {
-                        (Color::Green, "●")
-                    } else {
-                        (Color::Red, "○")
-                    };
-
-                    // Draw a dot at the market location
+                    let is_open = !is_weekend && local_time >= open_h * 60 && local_time < close_h * 60;
+                    let (color, status) = if is_open { (Color::Green, "●") } else { (Color::Red, "○") };
                     ctx.print(lon, lat, Span::styled(
                         format!("{} {}", status, name),
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ));
                 }
             });
+        frame.render_widget(canvas, v_left[0]);
 
-        // Split: map on top, legend on bottom
-        let v = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(14)])
-            .split(area);
-
-        frame.render_widget(canvas, v[0]);
-
-        // Legend table
-        let header = ratatui::widgets::Row::new(vec!["Market", "Local Time", "Hours (local)", "Status"])
+        // Hours legend
+        let hours_header = ratatui::widgets::Row::new(vec!["Market", "Local", "Hours", "Status"])
             .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-
-        let rows: Vec<ratatui::widgets::Row> = markets.iter().map(|&(name, _, _, open_h, close_h, tz_offset)| {
+        let hours_rows: Vec<ratatui::widgets::Row> = markets.iter().map(|&(name, _, _, open_h, close_h, tz_offset)| {
             let local_h = (now.hour() as i32 + tz_offset).rem_euclid(24) as u32;
             let local_m = now.minute();
             let local_time = local_h * 60 + local_m;
@@ -2935,18 +3060,86 @@ impl TradingApp {
             ratatui::widgets::Row::new(vec![
                 name.to_string(),
                 format!("{:02}:{:02}", local_h, local_m),
-                format!("{:02}:00 – {:02}:00", open_h, close_h),
+                format!("{:02}:00–{:02}:00", open_h, close_h),
                 status.to_string(),
             ]).style(Style::default().fg(color))
         }).collect();
-
-        let table = Table::new(rows, [
-            Constraint::Length(16), Constraint::Length(12),
-            Constraint::Length(16), Constraint::Length(8),
+        let hours_table = Table::new(hours_rows, [
+            Constraint::Length(14), Constraint::Length(8),
+            Constraint::Length(14), Constraint::Length(7),
         ])
-        .header(header)
-        .block(Block::default().borders(Borders::ALL).title(" Market Hours (local time) "));
-        frame.render_widget(table, v[1]);
+        .header(hours_header)
+        .block(Block::default().borders(Borders::ALL).title(" Market Hours "));
+        frame.render_widget(hours_table, v_left[1]);
+
+        // ── Right side: live prices table grouped by region ──
+        let loading_msg = if self.markets_data.is_empty() {
+            " (loading…)"
+        } else {
+            ""
+        };
+        let price_header = ratatui::widgets::Row::new(vec!["Symbol", "Name", "Last", "Chg%", "Type"])
+            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+
+        let mut price_rows: Vec<ratatui::widgets::Row> = Vec::new();
+        for &(region, symbols) in regions {
+            // Region separator row
+            price_rows.push(
+                ratatui::widgets::Row::new(vec![
+                    format!("── {} ──", region),
+                    String::new(), String::new(), String::new(), String::new(),
+                ]).style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            );
+            for sym in symbols.iter().copied() {
+                if let Some(row) = self.markets_data.get(sym) {
+                    let chg_color = if row.change_pct > 0.0 { Color::Green }
+                                    else if row.change_pct < 0.0 { Color::Red }
+                                    else { Color::Gray };
+                    let chg_str = if row.change_pct == 0.0 {
+                        "  –".to_string()
+                    } else {
+                        format!("{:+.2}%", row.change_pct)
+                    };
+                    let last_str = if row.last_price == 0.0 {
+                        "  –".to_string()
+                    } else if row.last_price >= 1000.0 {
+                        format!("{:>10.2}", row.last_price)
+                    } else {
+                        format!("{:>10.4}", row.last_price)
+                    };
+                    price_rows.push(
+                        ratatui::widgets::Row::new(vec![
+                            sym.to_string(),
+                            friendly_name(sym),
+                            last_str,
+                            chg_str.clone(),
+                            row.asset_class.clone(),
+                        ]).style(Style::default().fg(chg_color))
+                    );
+                } else {
+                    // No data yet
+                    price_rows.push(
+                        ratatui::widgets::Row::new(vec![
+                            sym.to_string(),
+                            friendly_name(sym),
+                            "  –".to_string(),
+                            "  –".to_string(),
+                            String::new(),
+                        ]).style(Style::default().fg(Color::DarkGray))
+                    );
+                }
+            }
+        }
+
+        let price_table = Table::new(price_rows, [
+            Constraint::Length(12), Constraint::Length(14),
+            Constraint::Length(12), Constraint::Length(8),
+            Constraint::Min(6),
+        ])
+        .header(price_header)
+        .block(Block::default().borders(Borders::ALL)
+            .title(format!(" Live Prices{} ", loading_msg)));
+        frame.render_widget(price_table, h[1]);
     }
 
     // ─── Tabs ───────────────────────────────────────────────────────────
@@ -3309,29 +3502,124 @@ impl TradingApp {
 
     // ─── MERVAL view ────────────────────────────────────────────────────
 
-    fn render_merval_view(&self, area: Rect, frame: &mut Frame) {
+    fn render_merval_view(&mut self, area: Rect, frame: &mut Frame) {
+        if self.merval_live_sorted.is_empty() {
+            frame.render_widget(
+                Paragraph::new("  Waiting for live data from Matriz Redis channel…")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .block(Block::default().borders(Borders::ALL).title(" MERVAL Live ")),
+                area,
+            );
+            return;
+        }
+
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints([Constraint::Min(0), Constraint::Length(30)])
             .split(area);
 
-        let sparkline = Sparkline::default()
-            .block(Block::default().borders(Borders::ALL).title(" MERVAL Index "))
-            .data(&self.merval_data.ticks)
-            .style(Style::default().fg(Color::LightBlue));
-        frame.render_widget(sparkline, chunks[0]);
+        // ── Left: scrollable instruments table ──
+        let selected_row = self.merval_live_state.selected().unwrap_or(0);
+        let header = ratatui::widgets::Row::new(vec!["Instrument", "Last", "Chg%", "Bid", "Ask", "High", "Low"])
+            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
 
-        let stats = vec![
-            Line::from(format!("ARS Price: ${:.0}", self.merval_data.current_price)),
-            Line::from(format!("Daily Change: {:.2}%", self.merval_data.daily_change)),
-            Line::from(format!("Volume (ARS): {:.0}", self.merval_data.volume_24h)),
-            Line::from(format!("Market Status: {}", self.merval_data.market_status)),
-            Line::from(format!("Last Update: {}", self.merval_data.last_update)),
+        let rows: Vec<ratatui::widgets::Row> = self.merval_live_sorted.iter().map(|instr| {
+            let short = instr
+                .trim_start_matches("M:bm_MERV_")
+                .trim_start_matches("M:rx_DDF_")
+                .trim_end_matches("_24hs")
+                .trim_end_matches("_48hs");
+            let d = self.merval_live.get(instr);
+            let (last, chg, bid, ask, high, low) = d.map(|d| (
+                d.last_price, d.change_pct, d.bid_price, d.ask_price, d.high, d.low
+            )).unwrap_or_default();
+
+            let chg_style = if chg >= 0.0 {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::Red)
+            };
+
+            ratatui::widgets::Row::new(vec![
+                ratatui::text::Span::raw(short.to_string()),
+                ratatui::text::Span::raw(if last > 0.0 { format!("{:.2}", last) } else { "--".into() }),
+                ratatui::text::Span::styled(
+                    if d.map(|d| d.prev_close > 0.0).unwrap_or(false) {
+                        format!("{:+.2}%", chg)
+                    } else { "--".into() },
+                    chg_style,
+                ),
+                ratatui::text::Span::raw(if bid > 0.0 { format!("{:.2}", bid) } else { "--".into() }),
+                ratatui::text::Span::raw(if ask > 0.0 { format!("{:.2}", ask) } else { "--".into() }),
+                ratatui::text::Span::raw(if high > 0.0 { format!("{:.2}", high) } else { "--".into() }),
+                ratatui::text::Span::raw(if low > 0.0 { format!("{:.2}", low) } else { "--".into() }),
+            ])
+        }).collect();
+
+        let widths = [
+            Constraint::Length(18),
+            Constraint::Length(12),
+            Constraint::Length(8),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(12),
+            Constraint::Length(12),
         ];
+        let table = Table::new(rows, widths)
+            .header(header)
+            .block(Block::default().borders(Borders::ALL)
+                .title(format!(" MERVAL Live ({}) [↑↓] ", self.merval_live_sorted.len())))
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::LightBlue).add_modifier(Modifier::BOLD))
+            .highlight_symbol("▶ ");
+        frame.render_stateful_widget(table, chunks[0], &mut self.merval_live_state);
 
-        let paragraph = Paragraph::new(Text::from(stats))
-            .block(Block::default().borders(Borders::ALL).title(" MERVAL Info "));
-        frame.render_widget(paragraph, chunks[1]);
+        // ── Right: sparkline + detail for selected instrument ──
+        let sel_instr = self.merval_live_sorted.get(selected_row).cloned();
+        let right_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(8), Constraint::Min(0)])
+            .split(chunks[1]);
+
+        if let Some(ref instr) = sel_instr {
+            if let Some(d) = self.merval_live.get(instr) {
+                let short = instr
+                    .trim_start_matches("M:bm_MERV_")
+                    .trim_start_matches("M:rx_DDF_")
+                    .trim_end_matches("_24hs")
+                    .trim_end_matches("_48hs");
+                let chg_color = if d.change_pct >= 0.0 { Color::Green } else { Color::Red };
+                let info = vec![
+                    Line::from(vec![
+                        ratatui::text::Span::raw("Last:  "),
+                        ratatui::text::Span::styled(format!("{:.2}", d.last_price), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    ]),
+                    Line::from(vec![
+                        ratatui::text::Span::raw("Chg:   "),
+                        ratatui::text::Span::styled(format!("{:+.2}%", d.change_pct), Style::default().fg(chg_color)),
+                    ]),
+                    Line::from(format!("Bid:   {:.2}", d.bid_price)),
+                    Line::from(format!("Ask:   {:.2}", d.ask_price)),
+                    Line::from(format!("High:  {:.2}", d.high)),
+                    Line::from(format!("Low:   {:.2}", d.low)),
+                ];
+                frame.render_widget(
+                    Paragraph::new(info).block(Block::default().borders(Borders::ALL).title(format!(" {} ", short))),
+                    right_chunks[0],
+                );
+                frame.render_widget(
+                    Sparkline::default()
+                        .block(Block::default().borders(Borders::ALL).title(" Price "))
+                        .data(&d.sparkline)
+                        .style(Style::default().fg(chg_color)),
+                    right_chunks[1],
+                );
+            }
+        } else {
+            frame.render_widget(
+                Paragraph::new("").block(Block::default().borders(Borders::ALL).title(" Detail ")),
+                right_chunks[0],
+            );
+        }
     }
 
     // ─── Orders table ───────────────────────────────────────────────────
