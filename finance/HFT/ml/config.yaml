@@ -1,0 +1,15 @@
+live:
+  max_position: 100
+  cooldown_seconds: 5
+  default_mode: paper
+  flatten_on_shutdown: true
+
+training:
+  label_threshold_bps: 10
+  bc_episodes: 20
+  bc_diversity_required: true
+  ppo_timesteps: 100000
+
+features:
+  rolling_window_size: 30
+  vwap_lookback_ticks: 20

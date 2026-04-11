@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## [2026-04-11]
+- [fix] `finance/HFT/backtest/formatData/fetch.py`: converted 6 bare module imports (`formatData.*`, `PPI.*`, `opciones.*`, `signals`) to absolute `finance.*` paths; replaced top-level `matplotlib.use('TkAgg')` with `Agg` backend for headless safety
+- [fix] `finance/HFT/backtest/livedata/order_book.py`: converted 3 bare module imports (`PPI.opciones.get_maturity`, `opciones.blackscholes`) to absolute `finance.*` paths
+- [fix] `finance/HFT/backtest/normalize.py`: replaced top-level `matplotlib.use('TkAgg')` with `Agg` backend for headless import safety
+- [chore] `requirements.txt`: added 20 missing packages — `loguru`, `seaborn`, `babel`, `pika`, `prometheus_client`, `sortedcontainers`, `ppi-client`, `lightgbm`, `gymnasium`, `stable-baselines3`, `torch` (CPU), and transitive deps
+- [chore] Modified `.claude/settings.json`
+- [chore] Modified `CLAUDE.md`
+- [chore] Modified `.claude/agents/hft-backtest.md`
+- [chore] Modified `ClaudeConversation.txt`
+- [chore] Modified `finance/BINANCE/db_config.py`
+- [chore] Modified `finance/BINANCE/monitor/alerting.py`
+- [chore] Modified `finance/BINANCE/monitor/config.py`
+- [chore] Modified `finance/BINANCE/monitor/data_stream.py`
+- [chore] Modified `finance/BINANCE/monitor/data_stream_async.py`
+- [chore] Modified `finance/BINANCE/monitor/graphing.py`
+
 ## 2026-04-07
 
 - [feat] Add 7 TUI tabs: Binance, MERVAL, Options, Futures, News, Markets, US Futures
