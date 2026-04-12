@@ -28,8 +28,8 @@ Only read source files when DATA_SPEC is insufficient or you need to make an edi
 
 ## Infrastructure
 
-- **PostgreSQL (TimescaleDB)**: `localhost:5432`, DB `haraidasan`, user `haraidasan`, pass `postBlack77`
-- **Redis**: `localhost:6379` (no auth)
+- **PostgreSQL (TimescaleDB)**: `100.112.16.115:5432`, DB `marketdata`, user `haraidasan`, pass `postBlack77`
+- **Redis**: `100.112.16.115:6379` (no auth)
 
 ## Key Data Tables
 
@@ -85,7 +85,7 @@ cd tws_terminal && cargo run --release
 PYTHONPATH=. .venv/bin/python3 mcp_server/server.py
 
 # Python DB access
-PGPASSWORD=postBlack77 psql -h localhost -U haraidasan -d haraidasan
+PGPASSWORD=postBlack77 psql -h 100.112.16.115 -U haraidasan -d postBlack77
 ```
 
 ## When Querying the DB
@@ -93,7 +93,7 @@ PGPASSWORD=postBlack77 psql -h localhost -U haraidasan -d haraidasan
 Use `psycopg2` via the venv (no local `psql`):
 ```python
 import psycopg2
-conn = psycopg2.connect("host=localhost dbname=haraidasan user=haraidasan password=postBlack77")
+conn = psycopg2.connect("host=100.112.16.115 dbname=marketdata user=haraidasan password=postBlack77")
 ```
 
 Or use MCP tools directly — they handle connection pooling and return structured JSON.

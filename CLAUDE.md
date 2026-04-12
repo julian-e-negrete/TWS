@@ -115,3 +115,145 @@ All credentials come from `.env` at the repo root (loaded by `dotenvy` in Rust, 
 - `Documentation/SPEC.md` — tab specs, key bindings, data contracts
 - `Documentation/DATA_SPEC.md` — PostgreSQL/MySQL schema and access patterns
 - `Documentation/ROADMAP.md` — Phase 0 (complete) through Phase 3 (planned)
+
+---
+
+## Python Module Map (`finance/`)
+
+```
+finance/
+├── config/settings.py          ★ Single source of truth for all config
+├── utils/logger.py             ★ Structured logging (loguru) — use everywhere
+├── PPI/classes/                ★ Single source of truth for PPI broker classes
+│   ├── account_ppi.py          — Auth, orders, account management
+│   ├── market_ppi.py           — Market data, WebSocket streaming
+│   ├── Instrument_class.py     — Sharpe, volatility, QuantLib
+│   └── Opciones_class.py       — Black-Scholes, GARCH, Greeks
+├── BINANCE/monitor/            — Real-time Binance 
+
+```
+
+### Key Invariants
+
+1. **No hardcoded credentials** — all secrets via `.env` + `finance.config.settings`
+2. **No duplicate PPI classes** — `finance/PPI/classes/` is the only copy
+3. **No duplicate indicator logic** — reuse `finance/HFT/dashboard/calcultions.py`
+4. **All backtest data** enters via `MarketDataBacktester.load_market_data()`
+5. **All backtest results** persist to `backtest_runs` table in PostgreSQL
+6. **Active futures instrument** is always queried dynamically — never hardcoded
+7. **`total_volume` in `ticks`** is cumulative daily — volume per period = `MAX - MIN`
+
+---
+
+## Coding Standards
+
+### Configuration
+```python
+# Always
+from finance.config import settings
+host = settings.db.host
+# Never hardcode: host = "192.168.0.244"
+```
+
+### Logging
+```python
+# Always
+from finance.utils.logger import logger
+logger.info("Loading data for {instrument}", instrument=instrument)
+# Never: print("Loading data")
+```
+
+### Imports — PPI classes (single source of truth)
+```python
+from finance.PPI.classes.market_ppi import Market_data
+from finance.PPI.classes.account_ppi import Account
+from finance.PPI.classes.Instrument_class import Instrument
+from finance.PPI.classes.Opciones_class import Opciones
+# Never import from finance.dashboard.classes.* or finance.HFT.backtest.PPI.*
+```
+
+### Active futures instrument
+```python
+# Always query dynamically
+active = await session.call_tool("get_active_instruments", {})
+instrument = next(r["instrument"] for r in active if "DDF_DLR" in r["instrument"])
+# Never: instrument = "M:rx_DDF_DLR_MAR26"
+```
+
+---
+
+## Scraper Server
+
+- **This project (AlgoTrading)** = consumer / processor / backtester. Runs locally.
+- **Scraper server (`192.168.1.244` / `100.112.16.115` tailscale)** = data producer. Ingests market data into PostgreSQL + MySQL.
+- SSH: `ssh 192.168.1.244` — project at `/home/julian/python/programming/`
+
+| Service | Runs on | What it does |
+|---------|---------|-------------|
+| `binance_monitor.service` | 192.168.1.244 | Binance kline WebSocket → `binance_ticks`. Mon–Fri 10:00–17:00 ART only |
+| `wsclient.service` | 192.168.1.244 | Matriz WebSocket → `ticks`. Mon–Fri 10:00–17:00 ART |
+| crontab `order_side.py` | 192.168.1.244 | Polls Matriz REST → `orders` every 2 min during market hours |
+
+No new rows outside market hours is expected, not a bug.
+
+---
+
+## External Services
+
+| Service | Protocol | Credential Keys | Usage |
+|---------|----------|-----------------|-------|
+| PPI (Portfolio Personal) | REST + WebSocket | `PPI_PUBLIC_KEY`, `PPI_PRIVATE_KEY` | Orders, market data |
+| Binance | WebSocket (kline) | `BINANCE_API_KEY`, `BINANCE_API_SECRET` | Crypto prices |
+| Matriz.eco | WebSocket | Session cookies via Playwright | HFT futures ticks |
+| MAE REST API | HTTP/REST | None (public) | Dólar MEP, FX futures |
+| BYMA REST API | HTTP/REST | Static token in header | CEDEARs, options chain |
+
+---
+
+## Workflow Rules (Mandatory)
+
+### GLPI Ticket Lifecycle
+
+Every task MUST have a GLPI ticket opened BEFORE any work begins. No code, no file edits, no commits until the ticket is open.
+
+**Known user IDs:**
+| ID | Name | Role |
+|----|------|------|
+| 13 | AlgoTrade Server | This agent — always the requester |
+| 15 | Scraper-Server | Assign scraper-server tickets here |
+
+**Use MCP tools** for all GLPI operations: `create_server_ticket`, `complete_server_ticket`, `list_server_tickets`, `proxy_health`. **Never use curl.**
+
+**Full flow (3 steps before work, 1 step after):**
+```
+# Auth
+POST http://100.112.16.115:8080/api/v2.2/token
+  {grant_type:"password", client_id:"5880211c5e72134f1ae47dda08377e4b503bd3d15f93d858dda5ab82a4a000e0",
+   client_secret:"b6d8fbdc08f6443abce916dae0d5184f56793a50782130e3c6fa6153692d165c",
+   username:"AlgoTrade Server", password:"45237348", scope:"api user"}
+
+# Create ticket → get {id}
+POST /Assistance/Ticket  {name, content, type:2, urgency:3, impact:3, priority:3}
+
+# MANDATORY: add AlgoTrade Server (id:13) as requester
+POST /Assistance/Ticket/<id>/TeamMember  {type:"User", id:13, role:"requester"}
+
+# --- DO WORK ---
+
+# Close ticket (complete_server_ticket MCP tool does steps 4+5 automatically)
+```
+
+### Commit Rule
+After every task where files were modified: `git add`, `git commit -m "<type>: <desc>"`, `git push`. Do this BEFORE closing the GLPI ticket.
+
+### Changelog Rule
+After every turn where files were edited or created, prepend bullets under today's UTC date in `CHANGELOG.md`. Tag each bullet: `[feat]`, `[fix]`, `[refactor]`, `[chore]`, `[docs]`. Never add an entry for `CHANGELOG.md` itself.
+
+### Verification Rule
+After every implementation, verify before declaring done:
+1. Service/process running?
+2. Data flowing (metrics populated)?
+3. Visible in Grafana?
+
+### No-Stall Rule
+Never run long-lived processes in the foreground of a tool call. Always use `systemd` for persistent services. Never use `sleep N && ...` for waits > 10s.

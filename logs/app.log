@@ -1,0 +1,15 @@
+2026-04-11 13:44:54.109 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 13:44:54.110 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/24hs) 2024-10-18 → 2026-04-11
+2026-04-11 13:44:54.421 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-11 13:45:02.323 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 13:45:02.325 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/24hs) 2024-10-18 → 2026-04-11
+2026-04-11 13:45:02.457 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-11 13:48:28.179 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 13:48:28.181 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/24hs) 2024-10-18 → 2026-04-11
+2026-04-11 13:48:28.483 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-11 13:48:45.844 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 13:48:45.845 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/24hs) 2024-10-18 → 2026-04-11
+2026-04-11 13:48:46.058 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-11 21:32:10.846 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 21:32:10.847 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/24hs) 2024-10-19 → 2026-04-12
+2026-04-11 21:32:11.025 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found

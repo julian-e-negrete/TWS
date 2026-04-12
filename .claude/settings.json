@@ -1,14 +1,35 @@
 {
-  "mcpServers": {
-    "tws-algotrading": {
-      "type": "stdio",
-      "command": "/home/haraidasan/programming/gitrepositories/TWS/.venv/bin/python3",
-      "args": [
-        "/home/haraidasan/programming/gitrepositories/TWS/mcp_server/server.py"
-      ],
-      "env": {
-        "PYTHONPATH": "/home/haraidasan/programming/gitrepositories/TWS"
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /home/haraidasan/programming/gitrepositories/TWS && python3 .kiro/hooks/update_changelog.py 2>/dev/null || true"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__tws-algotrading__save_backtest_result",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p /home/haraidasan/programming/gitrepositories/TWS/logs && echo \"[$(date -u +%Y-%m-%dT%H:%M:%SZ)] backtest result saved\" >> /home/haraidasan/programming/gitrepositories/TWS/logs/backtest_runs.log"
+          }
+        ]
       }
-    }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'GLPI REMINDER: If this was a task with file edits, ensure the GLPI ticket is closed via complete_server_ticket MCP tool.' >&2 || true"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -32,6 +32,17 @@ pub struct HistOrder {
     pub side: String,
 }
 
+/// One daily OHLCV bar returned by the PPI broker API via Python subprocess.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct OhlcvBar {
+    pub date:   String,
+    pub open:   Option<f64>,
+    pub high:   Option<f64>,
+    pub low:    Option<f64>,
+    pub close:  Option<f64>,
+    pub volume: Option<f64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct HistBinanceTick {
     pub timestamp: DateTime<Utc>,
@@ -439,10 +450,14 @@ pub async fn fetch_instrument_price_series_with_times(
         "5 minutes"  => 5 * 60,
         "30 minutes" => 30 * 60,
         "1 hour"     => 3600,
+        "3 days"     => 3   * 86400,
         "1 day"      => 86400,
-        "7 days"     => 7 * 86400,
-        "30 days"    => 30 * 86400,
-        _            => 86400,
+        "7 days"     => 7   * 86400,
+        "30 days"    => 30  * 86400,
+        "90 days"    => 90  * 86400,
+        "180 days"   => 180 * 86400,
+        "365 days"   => 365 * 86400,
+        _            => 30  * 86400,
     };
     let start_time = last_time - chrono::Duration::seconds(lookback_secs);
 
