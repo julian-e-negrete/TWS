@@ -47,43 +47,6 @@ impl SubTab {
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum MervalHistTab { Stocks, Options, Bonds, Favorites }
 
-/// Time range for MERVAL historical chart
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum MervalTimeRange { Min5, Min30, Hour1, Day1, Days7, Days30 }
-
-impl MervalTimeRange {
-    pub fn label(self) -> &'static str {
-        match self {
-            MervalTimeRange::Min5   => "3D",
-            MervalTimeRange::Min30  => "7D",
-            MervalTimeRange::Hour1  => "30D",
-            MervalTimeRange::Day1   => "90D",
-            MervalTimeRange::Days7  => "6M",
-            MervalTimeRange::Days30 => "1Y",
-        }
-    }
-    pub fn next(self) -> Self {
-        match self {
-            MervalTimeRange::Min5   => MervalTimeRange::Min30,
-            MervalTimeRange::Min30  => MervalTimeRange::Hour1,
-            MervalTimeRange::Hour1  => MervalTimeRange::Day1,
-            MervalTimeRange::Day1   => MervalTimeRange::Days7,
-            MervalTimeRange::Days7  => MervalTimeRange::Days30,
-            MervalTimeRange::Days30 => MervalTimeRange::Min5,
-        }
-    }
-    /// (bucket_interval, lookback_interval) — all use ≥1h buckets for multi-day history
-    pub fn sql_params(self) -> (&'static str, &'static str) {
-        match self {
-            MervalTimeRange::Min5   => ("1 hour",  "3 days"),
-            MervalTimeRange::Min30  => ("1 hour",  "7 days"),
-            MervalTimeRange::Hour1  => ("1 hour",  "30 days"),
-            MervalTimeRange::Day1   => ("1 hour",  "90 days"),
-            MervalTimeRange::Days7  => ("1 day",   "180 days"),
-            MervalTimeRange::Days30 => ("1 day",   "365 days"),
-        }
-    }
-}
 
 impl MervalHistTab {
     fn label(self) -> &'static str {
@@ -118,7 +81,6 @@ impl MervalHistTab {
 #[derive(PartialEq)]
 pub enum InputMode {
     Normal,
-    EditingOrder,
     FilterEdit,
     AddingFavorite,
     CalcEdit,
@@ -199,10 +161,8 @@ pub enum DbMessage {
     FuturesTicks(Vec<HistTick>),
     BinancePriceHistory(String, Vec<u64>),
     MervalInstruments(Vec<String>),
-    MervalPriceSeries(Vec<(f64, f64)>, Vec<String>),  // (points, time_labels)
     MervalInstrumentOrders(Vec<HistOrder>),
     MervalOhlcv(Vec<crate::db::OhlcvBar>),
-    MervalChartError(String),
     News(Vec<NewsItem>),
     UsFuturesOhlcv(Vec<crate::db::UsFuturesOhlcv>),
     MarketsData(Vec<MarketRow>),
@@ -271,7 +231,6 @@ pub struct TradingApp {
 
     // ── UI state ──
     pub input_mode: InputMode,
-    pub order_input: String,
     pub binance_connected: bool,
     pub error_message: Option<String>,
 
@@ -295,17 +254,11 @@ pub struct TradingApp {
     pub merval_instruments:       Vec<String>,
     pub merval_inst_list_state:   ratatui::widgets::ListState,
     pub merval_selected_instr:    Option<String>,
-    pub merval_time_range:        MervalTimeRange,
-    pub merval_price_series:      Vec<(f64, f64)>,
-    pub merval_price_labels:      Vec<String>,
     pub merval_detail_orders:     Vec<HistOrder>,
     pub merval_detail_orders_state: TableState,
     // PPI daily OHLCV
     pub merval_ppi_ohlcv:     Vec<crate::db::OhlcvBar>,
-    pub merval_show_ohlcv:    bool,
     pub merval_ohlcv_loading: bool,
-    // Dedicated error for the Merval price series (avoids pollution from other triggers)
-    pub merval_chart_error:   Option<String>,
 
     // ── Favorites ──
     pub favorites: Vec<String>,
@@ -388,7 +341,6 @@ impl TradingApp {
             orders_table_state: TableState::default(),
             selected_order_index: 0,
             input_mode: InputMode::Normal,
-            order_input: String::new(),
             binance_connected: false,
             error_message: None,
             hist_ticks: Vec::new(),
@@ -406,15 +358,10 @@ impl TradingApp {
             merval_instruments:         Vec::new(),
             merval_inst_list_state:     ratatui::widgets::ListState::default(),
             merval_selected_instr:      None,
-            merval_time_range:          MervalTimeRange::Hour1,
-            merval_price_series:        Vec::new(),
-            merval_price_labels:        Vec::new(),
             merval_detail_orders:       Vec::new(),
             merval_detail_orders_state: TableState::default(),
             merval_ppi_ohlcv:     Vec::new(),
-            merval_show_ohlcv:    false,
             merval_ohlcv_loading: false,
-            merval_chart_error:   None,
             favorites: Vec::new(),
             fav_selected: 0,
             fav_input: String::new(),
@@ -689,36 +636,6 @@ impl TradingApp {
         });
     }
 
-    fn trigger_merval_price_series(&mut self, instrument: &str) {
-        let Some(tx) = self.db_tx.clone() else { return };
-        let instr = instrument.to_string();
-        let range = self.merval_time_range;
-        let client = self.db_client.clone();
-        self.merval_selected_instr = Some(instr.clone());
-        self.merval_price_series.clear();
-        self.merval_price_labels.clear();
-        self.merval_detail_orders.clear();
-        self.merval_chart_error = None;
-        tokio::spawn(async move {
-            let Some(c) = Self::get_db_client(client).await else {
-                let _ = tx.send(DbMessage::MervalChartError("DB connection failed".into()));
-                return;
-            };
-            let (series_result, orders_result) = tokio::join!(
-                crate::db::fetch_instrument_price_series_with_times(&c, &instr, range.sql_params()),
-                crate::db::fetch_instrument_orders(&c, &instr)
-            );
-            match series_result {
-                Ok((series, labels)) => { let _ = tx.send(DbMessage::MervalPriceSeries(series, labels)); }
-                Err(e) => { let _ = tx.send(DbMessage::MervalChartError(format!("{e:#}"))); }
-            }
-            // Orders failure is non-fatal — log to stderr, don't break the chart
-            match orders_result {
-                Ok(orders) => { let _ = tx.send(DbMessage::MervalInstrumentOrders(orders)); }
-                Err(e) => { eprintln!("[merval orders] {e}"); }
-            }
-        });
-    }
 
     /// Locate the repo root (one level up if running from tws_terminal/).
     fn project_root() -> std::path::PathBuf {
@@ -730,7 +647,7 @@ impl TradingApp {
         }
     }
 
-    /// Fetch 180-day daily OHLCV from PPI via Python subprocess.
+    /// Fetch OHLCV from PPI via Python subprocess. Uses AUTO type to handle stocks, bonds, CEDEARs.
     fn trigger_ppi_ohlcv(&mut self, ticker: &str) {
         let Some(tx) = self.db_tx.clone() else { return };
         if self.merval_ohlcv_loading { return; }
@@ -740,16 +657,12 @@ impl TradingApp {
         tokio::spawn(async move {
             let root = Self::project_root();
             let python = root.join(".venv/bin/python3");
-            let end = chrono::Utc::now().format("%Y-%m-%d").to_string();
-            let start = (chrono::Utc::now() - chrono::Duration::days(540))
-                .format("%Y-%m-%d").to_string();
             let result = tokio::process::Command::new(&python)
                 .args([
                     "-m", "PPI.fetch_ohlcv",
                     "--tickers", &ticker,
-                    "--output", "json",
-                    "--start", &start,
-                    "--end",   &end,
+                    "--type", "AUTO",
+                    "--output", "json"
                 ])
                 .current_dir(&root)
                 .env("PYTHONPATH", &root)
@@ -1050,20 +963,10 @@ impl TradingApp {
                     self.merval_inst_list_state.select(Some(0));
                 }
             }
-            DbMessage::MervalPriceSeries(series, labels) => {
-                self.merval_price_series = series;
-                self.merval_price_labels = labels;
-            }
-            DbMessage::MervalInstrumentOrders(orders) => {
-                self.merval_detail_orders = orders;
-                self.merval_detail_orders_state = TableState::default();
-            }
+            DbMessage::MervalInstrumentOrders(_) => {}
             DbMessage::MervalOhlcv(bars) => {
                 self.merval_ppi_ohlcv = bars;
                 self.merval_ohlcv_loading = false;
-            }
-            DbMessage::MervalChartError(e) => {
-                self.merval_chart_error = Some(e);
             }
             DbMessage::News(items)          => { self.news_items = items; self.news_loading = false; }
             DbMessage::UsFuturesOhlcv(rows) => { self.us_futures_ohlcv = rows; }
@@ -1248,28 +1151,6 @@ impl TradingApp {
             InputMode::Normal => match event.code {
                 crossterm::event::KeyCode::Char('q') => return false,
 
-                crossterm::event::KeyCode::Char('o') => {
-                    if self.active_tab == ExchangeTab::Merval && self.merval_subtab == SubTab::Historical {
-                        // Toggle PPI daily OHLCV view
-                        self.merval_show_ohlcv = !self.merval_show_ohlcv;
-                        if self.merval_show_ohlcv {
-                            if let Some(instr) = self.merval_selected_instr.clone() {
-                                let ticker = instr
-                                    .trim_start_matches("M:bm_MERV_")
-                                    .trim_end_matches("_24hs")
-                                    .trim_end_matches("_48hs")
-                                    .to_string();
-                                if self.merval_ppi_ohlcv.is_empty() {
-                                    self.trigger_ppi_ohlcv(&ticker);
-                                }
-                            }
-                        }
-                    } else {
-                        self.input_mode = InputMode::EditingOrder;
-                        self.order_input.clear();
-                    }
-                }
-
                 // Open filter editor (only meaningful on Historical subtab)
                 crossterm::event::KeyCode::Char('f') => {
                     self.input_mode = InputMode::FilterEdit;
@@ -1305,15 +1186,7 @@ impl TradingApp {
                     }
                 }
 
-                // [t] cycle time range on MERVAL Historical
-                crossterm::event::KeyCode::Char('t') => {
-                    if self.active_tab == ExchangeTab::Merval && self.merval_subtab == SubTab::Historical {
-                        self.merval_time_range = self.merval_time_range.next();
-                        if let Some(instr) = self.merval_selected_instr.clone() {
-                            self.trigger_merval_price_series(&instr);
-                        }
-                    }
-                }
+                crossterm::event::KeyCode::Char('t') => {}
 
                 // [r] refresh on Options/Futures/News tabs
                 crossterm::event::KeyCode::Char('r') => {                    match self.active_tab {
@@ -1346,12 +1219,15 @@ impl TradingApp {
                     } else if self.active_tab == ExchangeTab::Merval && self.merval_subtab == SubTab::Historical {
                         if let Some(idx) = self.merval_inst_list_state.selected() {
                             if let Some(instr) = self.merval_instruments.get(idx).cloned() {
-                                // Clear PPI OHLCV when switching instruments
                                 self.merval_ppi_ohlcv.clear();
                                 self.merval_ohlcv_loading = false;
-                                self.merval_show_ohlcv = false;
-                                self.merval_chart_error = None;
-                                self.trigger_merval_price_series(&instr);
+                                self.merval_selected_instr = Some(instr.clone());
+                                let ticker = instr
+                                    .trim_start_matches("M:bm_MERV_")
+                                    .trim_end_matches("_24hs")
+                                    .trim_end_matches("_48hs")
+                                    .to_string();
+                                self.trigger_ppi_ohlcv(&ticker);
                             }
                         }
                     } else if self.active_tab == ExchangeTab::News {
@@ -1630,37 +1506,6 @@ impl TradingApp {
                     }
                 }
 
-                _ => {}
-            },
-
-            InputMode::EditingOrder => match event.code {
-                crossterm::event::KeyCode::Enter => {
-                    let parts: Vec<&str> = self.order_input.split_whitespace().collect();
-                    if parts.len() == 3 {
-                        let side = parts[0].to_uppercase();
-                        if let (Ok(qty), Ok(price)) =
-                            (parts[1].parse::<u32>(), parts[2].parse::<f64>())
-                        {
-                            let order = Order::new(
-                                side,
-                                price,
-                                qty,
-                                format!("{:?}", self.active_tab),
-                            );
-                            self.orders.push(order);
-                        }
-                    }
-                    self.input_mode = InputMode::Normal;
-                    self.order_input.clear();
-                }
-                crossterm::event::KeyCode::Char(c) => self.order_input.push(c),
-                crossterm::event::KeyCode::Backspace => {
-                    self.order_input.pop();
-                }
-                crossterm::event::KeyCode::Esc => {
-                    self.input_mode = InputMode::Normal;
-                    self.order_input.clear();
-                }
                 _ => {}
             },
 
@@ -2168,99 +2013,18 @@ impl TradingApp {
             &mut self.merval_inst_list_state,
         );
 
-        // ── Right panel: chart on top, orders on bottom ──
-        let right = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(bottom.height)])
-            .split(h[1]);
-
         if let Some(ref instr) = self.merval_selected_instr.clone() {
             let short = instr.trim_start_matches("M:bm_MERV_").trim_end_matches("_24hs").trim_end_matches("_48hs");
-
-            if self.merval_show_ohlcv {
-                self.render_ppi_ohlcv_chart(right[0], frame, short);
-            } else if self.merval_price_series.is_empty() {
-                let msg = if let Some(ref e) = self.merval_chart_error {
-                    format!("  Error: {e}")
-                } else {
-                    format!("  Loading {} ({})…  [t] cycle range", short, self.merval_time_range.label())
-                };
-                frame.render_widget(
-                    Paragraph::new(msg)
-                        .block(Block::default().borders(Borders::ALL).title(format!(" {} ", short))),
-                    right[0],
-                );
-            } else {
-                let series = &self.merval_price_series;
-                let prices: Vec<f64> = series.iter().map(|p| p.1).collect();
-                let min = prices.iter().cloned().fold(f64::MAX, f64::min);
-                let max = prices.iter().cloned().fold(f64::MIN, f64::max);
-                let pad = (max - min) * 0.05 + 0.01;
-                let n = series.len() as f64;
-                let color = if prices.last().unwrap_or(&0.0) >= prices.first().unwrap_or(&0.0) { Color::Green } else { Color::Red };
-
-                let dataset = Dataset::default()
-                    .marker(symbols::Marker::Braille)
-                    .graph_type(GraphType::Line)
-                    .style(Style::default().fg(color))
-                    .data(series);
-
-                // Build evenly-spaced time labels from stored labels
-                let labels = &self.merval_price_labels;
-                let x_labels: Vec<Span> = if labels.len() >= 2 {
-                    let mid = labels.len() / 2;
-                    vec![
-                        Span::styled(labels[0].clone(), Style::default().fg(Color::DarkGray)),
-                        Span::styled(labels[mid].clone(), Style::default().fg(Color::DarkGray)),
-                        Span::styled(labels[labels.len()-1].clone(), Style::default().fg(Color::DarkGray)),
-                    ]
-                } else {
-                    vec![Span::raw("open"), Span::raw("close")]
-                };
-
-                let chart = Chart::new(vec![dataset])
-                    .block(Block::default().borders(Borders::ALL)
-                        .title(format!(" {} — {} ({} pts)  [t] range  [o] OHLCV", short, self.merval_time_range.label(), series.len())))
-                    .x_axis(Axis::default().bounds([0.0, n]).labels(x_labels))
-                    .y_axis(Axis::default().bounds([min - pad, max + pad])
-                        .labels(vec![
-                            Span::styled(format!("{:.2}", min), Style::default().fg(Color::DarkGray)),
-                            Span::styled(format!("{:.2}", max), Style::default().fg(Color::DarkGray)),
-                        ]));
-                frame.render_widget(chart, right[0]);
-            }
-
-            // Orders table in bottom panel
-            let header = ratatui::widgets::Row::new(vec!["Time","Price","Vol","Side"])
-                .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
-            let orders = self.merval_detail_orders.clone();
-            let rows: Vec<ratatui::widgets::Row> = orders.iter().map(|r| {
-                let color = if r.side == "B" { Color::Green } else { Color::Red };
-                ratatui::widgets::Row::new(vec![
-                    r.time.format("%H:%M:%S").to_string(),
-                    format!("{:.2}", r.price),
-                    r.volume.to_string(),
-                    if r.side == "B" { "BUY".into() } else { "SELL".into() },
-                ]).style(Style::default().fg(color))
-            }).collect();
-            let table = Table::new(rows, [Constraint::Length(10), Constraint::Length(12), Constraint::Length(10), Constraint::Length(6)])
-                .header(header)
-                .highlight_style(Style::default().fg(Color::Black).bg(Color::LightBlue).add_modifier(Modifier::BOLD))
-                .block(Block::default().borders(Borders::ALL)
-                    .title(format!(" {} Orders ({}) [↑↓] scroll ", short, orders.len())));
-            frame.render_stateful_widget(table, right[1], &mut self.merval_detail_orders_state);
+            self.render_ppi_ohlcv_chart(h[1], frame, short);
         } else {
             frame.render_widget(
                 Paragraph::new("  Select an instrument and press [Enter] to load chart")
                     .style(Style::default().fg(Color::DarkGray))
                     .block(Block::default().borders(Borders::ALL).title(" Chart ")),
-                right[0],
-            );
-            frame.render_widget(
-                Paragraph::new("").block(Block::default().borders(Borders::ALL).title(" Orders ")),
-                right[1],
+                h[1],
             );
         }
+
     }
 
     /// Render PPI daily OHLCV chart (high/low band + close line + volume bars).
@@ -2270,7 +2034,7 @@ impl TradingApp {
                 Paragraph::new(format!("  Fetching PPI daily OHLCV for {}…", short))
                     .style(Style::default().fg(Color::Yellow))
                     .block(Block::default().borders(Borders::ALL)
-                        .title(format!(" {} — PPI Daily OHLCV  [o] intraday ", short))),
+                        .title(format!(" {} — PPI Daily OHLCV  ", short))),
                 area,
             );
             return;
@@ -2280,7 +2044,7 @@ impl TradingApp {
                 Paragraph::new("  No PPI OHLCV data — press [p] again or check credentials")
                     .style(Style::default().fg(Color::DarkGray))
                     .block(Block::default().borders(Borders::ALL)
-                        .title(format!(" {} — PPI Daily OHLCV  [o] intraday ", short))),
+                        .title(format!(" {} — PPI Daily OHLCV  ", short))),
                 area,
             );
             return;
@@ -2353,7 +2117,7 @@ impl TradingApp {
         let sign = if pct_chg >= 0.0 { "+" } else { "" };
         let chart = Chart::new(vec![dataset_close, dataset_high, dataset_low])
             .block(Block::default().borders(Borders::ALL).title(format!(
-                " {} — PPI Daily ({} bars)  close {:.2}  {}{:.2}%  [o] intraday ",
+                " {} — PPI Daily ({} bars)  close {:.2}  {}{:.2}%  ",
                 short, n, last_close, sign, pct_chg
             )))
             .x_axis(Axis::default().bounds([0.0, n as f64]).labels(x_labels))
@@ -3974,10 +3738,6 @@ impl TradingApp {
         };
 
         let (text, style) = match self.input_mode {
-            InputMode::EditingOrder => (
-                format!("> {}", self.order_input),
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            ),
             InputMode::FilterEdit => (
                 "[Tab] switch field  [Enter] apply  [Esc] cancel".to_string(),
                 Style::default().fg(Color::Cyan),
@@ -4002,7 +3762,7 @@ impl TradingApp {
                         (ExchangeTab::Binance, SubTab::Historical) =>
                             "[↑↓] scroll  [p] panel  [f] filter  [s] real-time  [1-5] tab  [q] quit",
                         (ExchangeTab::Merval, SubTab::RealTime) =>
-                            "[o] new order  [↑↓] navigate  [s] historical  [1-5] tab  [q] quit",
+                            "[↑↓] navigate  [s] historical  [1-5] tab  [q] quit",
                         _ =>
                             "[↑↓] select symbol  [s] historical  [1-5] tab  [q] quit",
                     },

@@ -57,6 +57,26 @@ def _make_ppi_client() -> PPI:
 # Fetch
 # ---------------------------------------------------------------------------
 
+_AUTO_TYPES = ["ACCIONES", "BONOS", "CEDEARS"]
+
+
+def _fetch_one(
+    ppi: "PPI",
+    ticker: str,
+    instrument_type: str,
+    settlement: str,
+    start_dt: "datetime",
+    end_dt: "datetime",
+) -> list | None:
+    """Return raw PPI response or None on failure / empty."""
+    try:
+        raw = ppi.marketdata.search(ticker.upper(), instrument_type, settlement, start_dt, end_dt)
+        return raw if raw else None
+    except Exception as e:
+        logger.debug(f"  {ticker}/{instrument_type}: {e}")
+        return None
+
+
 def fetch_ohlcv(
     tickers: list[str],
     instrument_type: str,
@@ -70,8 +90,9 @@ def fetch_ohlcv(
     Parameters
     ----------
     tickers        : list of PPI ticker symbols, e.g. ["GGAL", "YPFD"]
-    instrument_type: PPI instrument type string, e.g. "ACCIONES", "BONOS", "CEDEARS"
-    settlement     : settlement window, e.g. "24hs", "48hs", "INMEDIATA"
+    instrument_type: PPI instrument type string, e.g. "ACCIONES", "BONOS", "CEDEARS".
+                     Use "AUTO" to try all types and return the first that has data.
+    settlement     : settlement window, e.g. "A-24hs", "A-48hs", "INMEDIATA"
     start_date     : ISO date string "YYYY-MM-DD"
     end_date       : ISO date string "YYYY-MM-DD"
 
@@ -88,17 +109,23 @@ def fetch_ohlcv(
     result: dict[str, pd.DataFrame] = {}
 
     for ticker in tickers:
-        logger.info(f"Fetching {ticker} ({instrument_type}/{settlement}) {start_date} → {end_date}")
-        try:
-            raw = ppi.marketdata.search(
-                ticker.upper(), instrument_type, settlement, start_dt, end_dt
-            )
-        except Exception as e:
-            logger.error(f"Failed to fetch {ticker}: {e}")
-            continue
+        # Determine which types to try
+        if instrument_type.upper() == "AUTO":
+            types_to_try = _AUTO_TYPES
+        else:
+            types_to_try = [instrument_type]
+
+        raw = None
+        matched_type = instrument_type
+        for itype in types_to_try:
+            logger.info(f"Fetching {ticker} ({itype}/{settlement}) {start_date} → {end_date}")
+            raw = _fetch_one(ppi, ticker, itype, settlement, start_dt, end_dt)
+            if raw:
+                matched_type = itype
+                break
 
         if not raw:
-            logger.warning(f"No data returned for {ticker}")
+            logger.warning(f"No data returned for {ticker} (tried: {', '.join(types_to_try)})")
             continue
 
         df = pd.DataFrame(raw)
@@ -128,7 +155,7 @@ def fetch_ohlcv(
 
         df = df.dropna(subset=["close"])
         result[ticker] = df
-        logger.info(f"  {ticker}: {len(df)} bars  close={df['close'].iloc[-1]:.2f}")
+        logger.info(f"  {ticker} [{matched_type}]: {len(df)} bars  close={df['close'].iloc[-1]:.2f}")
 
     return result
 
@@ -247,13 +274,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--type",
         dest="instrument_type",
-        default="ACCIONES",
-        help="Instrument type: ACCIONES, BONOS, CEDEARS, FUTUROS (default: ACCIONES)",
+        default="AUTO",
+        help="Instrument type: AUTO, ACCIONES, BONOS, CEDEARS, FUTUROS (default: AUTO — tries all)",
     )
     p.add_argument(
         "--settlement",
-        default="24hs",
-        help="Settlement: 24hs, 48hs, INMEDIATA (default: 24hs)",
+        default="A-24hs",
+        help="Settlement: A-24hs, A-48hs, INMEDIATA (default: 24hs)",
     )
     p.add_argument(
         "--start",

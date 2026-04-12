@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## [2026-04-12]
+- [feat] `PPI/fetch_ohlcv.py`: add `--type AUTO` mode that tries ACCIONES → BONOS → CEDEARS in order, returning the first type with data — enables fetching stocks, bonds, and CEDEARs without specifying the instrument type
+- [refactor] `tws_terminal/src/ui/app.rs`: replace Merval Historical tab's TimescaleDB price-series chart with PPI OHLCV as the sole data source; Enter key now directly fetches PPI OHLCV instead of the old DB query
+- [refactor] `tws_terminal/src/ui/app.rs`: remove `MervalTimeRange` enum, `trigger_merval_price_series`, `merval_price_series`, `merval_price_labels`, `merval_show_ohlcv`, `merval_chart_error` and the `[o]`/`[t]` key handlers tied to them
+- [refactor] `tws_terminal/src/ui/app.rs`: remove `InputMode::EditingOrder`, `order_input` field, `[o]` new-order key binding, and all associated status-bar rendering
+
 ## [2026-04-11]
 - [fix] `finance/HFT/backtest/formatData/fetch.py`: converted 6 bare module imports (`formatData.*`, `PPI.*`, `opciones.*`, `signals`) to absolute `finance.*` paths; replaced top-level `matplotlib.use('TkAgg')` with `Agg` backend for headless safety
 - [fix] `finance/HFT/backtest/livedata/order_book.py`: converted 3 bare module imports (`PPI.opciones.get_maturity`, `opciones.blackscholes`) to absolute `finance.*` paths
