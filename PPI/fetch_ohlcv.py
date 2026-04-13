@@ -30,7 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -57,7 +57,11 @@ def _make_ppi_client() -> PPI:
 # Fetch
 # ---------------------------------------------------------------------------
 
-_AUTO_TYPES = ["ACCIONES", "BONOS", "CEDEARS"]
+_AUTO_TYPES = ["ACCIONES", "BONOS", "CEDEARS", "OPCIONES"]
+
+# Maximum look-back window (days) enforced per instrument type.
+# Options expire within weeks — querying more history returns nothing and wastes API calls.
+_MAX_DAYS: dict[str, int] = {"OPCIONES": 30}
 
 
 def _fetch_one(
@@ -118,8 +122,15 @@ def fetch_ohlcv(
         raw = None
         matched_type = instrument_type
         for itype in types_to_try:
-            logger.info(f"Fetching {ticker} ({itype}/{settlement}) {start_date} → {end_date}")
-            raw = _fetch_one(ppi, ticker, itype, settlement, start_dt, end_dt)
+            # Enforce per-type maximum look-back window
+            effective_start = start_dt
+            if itype in _MAX_DAYS:
+                cutoff = end_dt - timedelta(days=_MAX_DAYS[itype])
+                if effective_start < cutoff:
+                    effective_start = cutoff
+            eff_start_str = effective_start.strftime("%Y-%m-%d")
+            logger.info(f"Fetching {ticker} ({itype}/{settlement}) {eff_start_str} → {end_date}")
+            raw = _fetch_one(ppi, ticker, itype, settlement, effective_start, end_dt)
             if raw:
                 matched_type = itype
                 break

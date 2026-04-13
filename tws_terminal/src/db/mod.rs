@@ -390,28 +390,72 @@ pub async fn fetch_futures_ticks(client: &Client, instrument: &str, limit: i64) 
 }
 
 pub async fn fetch_distinct_merval_instruments(client: &Client, _days: i64) -> Result<Vec<String>> {
-    // Hard-coded interval literals let TimescaleDB use chunk exclusion (much faster than string interpolation)
-    let rows = client.query(
-        "SELECT DISTINCT instrument FROM ticks
-         WHERE instrument NOT LIKE '%DDF_DLR%'
-           AND time > NOW() - INTERVAL '7 days'
-         ORDER BY instrument
-         LIMIT 300",
-        &[],
-    ).await?;
-    // If nothing in last 7 days (holiday), try 30 days
-    if rows.is_empty() {
-        let rows2 = client.query(
-            "SELECT DISTINCT instrument FROM ticks
-             WHERE instrument NOT LIKE '%DDF_DLR%'
-               AND time > NOW() - INTERVAL '30 days'
-             ORDER BY instrument
-             LIMIT 300",
-            &[],
-        ).await?;
-        return Ok(rows2.iter().map(|r| r.get::<_, String>(0)).collect());
+    // Recursive CTE skip-scan: uses the (instrument, time DESC) composite index to jump
+    // between distinct instrument values instead of scanning all rows.
+    // Tested: GROUP BY on 1.4M rows = 3.8s; this CTE = 0.4s (10× faster).
+    //
+    // Window ladder: try 1 day first (covers current session, ~1 chunk),
+    // fall back to 7 days (weekends/holidays), then 30 days.
+    const QUERIES: [&str; 3] = [
+        "WITH RECURSIVE t(instrument) AS (
+            (SELECT instrument FROM ticks
+             WHERE time > NOW() - INTERVAL '1 day'
+             ORDER BY instrument LIMIT 1)
+            UNION ALL
+            SELECT (SELECT instrument FROM ticks
+                    WHERE instrument > t.instrument
+                      AND time > NOW() - INTERVAL '1 day'
+                    ORDER BY instrument LIMIT 1)
+            FROM t WHERE t.instrument IS NOT NULL
+         )
+         SELECT instrument FROM t
+         WHERE instrument IS NOT NULL
+           AND instrument NOT LIKE '%DDF_DLR%'
+           AND instrument NOT LIKE '%GFG%'
+         ORDER BY instrument LIMIT 300",
+
+        "WITH RECURSIVE t(instrument) AS (
+            (SELECT instrument FROM ticks
+             WHERE time > NOW() - INTERVAL '7 days'
+             ORDER BY instrument LIMIT 1)
+            UNION ALL
+            SELECT (SELECT instrument FROM ticks
+                    WHERE instrument > t.instrument
+                      AND time > NOW() - INTERVAL '7 days'
+                    ORDER BY instrument LIMIT 1)
+            FROM t WHERE t.instrument IS NOT NULL
+         )
+         SELECT instrument FROM t
+         WHERE instrument IS NOT NULL
+           AND instrument NOT LIKE '%DDF_DLR%'
+           AND instrument NOT LIKE '%GFG%'
+         ORDER BY instrument LIMIT 300",
+
+        "WITH RECURSIVE t(instrument) AS (
+            (SELECT instrument FROM ticks
+             WHERE time > NOW() - INTERVAL '30 days'
+             ORDER BY instrument LIMIT 1)
+            UNION ALL
+            SELECT (SELECT instrument FROM ticks
+                    WHERE instrument > t.instrument
+                      AND time > NOW() - INTERVAL '30 days'
+                    ORDER BY instrument LIMIT 1)
+            FROM t WHERE t.instrument IS NOT NULL
+         )
+         SELECT instrument FROM t
+         WHERE instrument IS NOT NULL
+           AND instrument NOT LIKE '%DDF_DLR%'
+           AND instrument NOT LIKE '%GFG%'
+         ORDER BY instrument LIMIT 300",
+    ];
+
+    for sql in &QUERIES {
+        let rows = client.query(*sql, &[]).await?;
+        if !rows.is_empty() {
+            return Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect());
+        }
     }
-    Ok(rows.iter().map(|r| r.get::<_, String>(0)).collect())
+    Ok(vec![])
 }
 
 pub async fn fetch_instrument_price_series(client: &Client, instrument: &str) -> Result<Vec<(f64, f64)>> {

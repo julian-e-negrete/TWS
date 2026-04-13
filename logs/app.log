@@ -13,3 +13,245 @@
 2026-04-11 21:32:10.846 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
 2026-04-11 21:32:10.847 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/24hs) 2024-10-19 → 2026-04-12
 2026-04-11 21:32:11.025 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-11 23:31:40.690 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 23:31:40.691 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/24hs) 2025-01-01 → 2025-12-31
+2026-04-11 23:31:40.793 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch GGAL: {'error': 'Settlement not found'}
+2026-04-11 23:31:40.793 | INFO     | __main__:fetch_ohlcv:91 - Fetching YPFD (ACCIONES/24hs) 2025-01-01 → 2025-12-31
+2026-04-11 23:31:40.881 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch YPFD: {'error': 'Settlement not found'}
+2026-04-11 23:31:40.882 | INFO     | __main__:fetch_ohlcv:91 - Fetching PAMP (ACCIONES/24hs) 2025-01-01 → 2025-12-31
+2026-04-11 23:31:40.969 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch PAMP: {'error': 'Settlement not found'}
+2026-04-11 23:31:40.970 | WARNING  | __main__:plot_ohlcv:158 - No data to plot
+2026-04-11 23:33:37.857 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 23:33:37.859 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24HS) 2025-01-01 → 2025-12-31
+2026-04-11 23:33:38.022 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 243 bars  close=8200.00
+2026-04-11 23:33:38.022 | INFO     | __main__:fetch_ohlcv:91 - Fetching YPFD (ACCIONES/A-24HS) 2025-01-01 → 2025-12-31
+2026-04-11 23:33:38.154 | INFO     | __main__:fetch_ohlcv:131 -   YPFD: 243 bars  close=54600.00
+2026-04-11 23:33:38.154 | INFO     | __main__:fetch_ohlcv:91 - Fetching PAMP (ACCIONES/A-24HS) 2025-01-01 → 2025-12-31
+2026-04-11 23:33:38.305 | INFO     | __main__:fetch_ohlcv:131 -   PAMP: 243 bars  close=5260.00
+2026-04-11 23:35:18.052 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 23:35:18.053 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24HS) 2025-01-01 → 2025-12-31
+2026-04-11 23:35:18.181 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 243 bars  close=8200.00
+2026-04-11 23:39:34.239 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 23:39:34.240 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/A-24hs) 2026-01-12 → 2026-04-12
+2026-04-11 23:39:34.435 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-11 23:41:05.357 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 23:41:05.358 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-01 → 2025-12-31
+2026-04-11 23:41:05.499 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 243 bars  close=8200.00
+2026-04-11 23:41:51.413 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 23:41:51.414 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-12 → 2026-04-11
+2026-04-11 23:41:51.580 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 302 bars  close=7075.00
+2026-04-11 23:42:47.666 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 23:42:47.667 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-01 → 2026-04-11
+2026-04-11 23:42:47.803 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 309 bars  close=7075.00
+2026-04-11 23:43:19.430 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-11 23:43:19.431 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-11
+2026-04-11 23:43:19.612 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-12 00:06:05.960 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:06:05.962 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:06:06.121 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 309 bars  close=7075.00
+2026-04-12 00:07:27.350 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:07:27.351 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:07:27.538 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 309 bars  close=7075.00
+2026-04-12 00:09:12.582 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:09:12.584 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:09:12.764 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 309 bars  close=7075.00
+2026-04-12 00:13:01.925 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:13:01.926 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:13:02.227 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-12 00:15:36.693 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:15:36.694 | INFO     | __main__:fetch_ohlcv:91 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:15:37.079 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch AL30: Instrument not found
+2026-04-12 00:15:56.450 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:15:56.451 | INFO     | __main__:fetch_ohlcv:91 - Fetching BBDD (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:15:56.625 | ERROR    | __main__:fetch_ohlcv:97 - Failed to fetch BBDD: Instrument not found
+2026-04-12 00:16:06.436 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:16:06.437 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:16:06.729 | INFO     | __main__:fetch_ohlcv:131 -   GGAL: 309 bars  close=7075.00
+2026-04-12 00:16:19.486 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:16:19.487 | INFO     | __main__:fetch_ohlcv:91 - Fetching GGALD (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:16:19.770 | INFO     | __main__:fetch_ohlcv:131 -   GGALD: 309 bars  close=5.01
+2026-04-12 00:16:25.332 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:16:25.333 | INFO     | __main__:fetch_ohlcv:91 - Fetching SUPV (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:16:25.497 | INFO     | __main__:fetch_ohlcv:131 -   SUPV: 309 bars  close=2867.50
+2026-04-12 00:19:35.296 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:19:35.298 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:19:35.691 | DEBUG    | __main__:_fetch_one:76 -   AL30/ACCIONES: Instrument not found
+2026-04-12 00:19:35.692 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30 (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:19:36.019 | INFO     | __main__:fetch_ohlcv:158 -   AL30 [BONOS]: 309 bars  close=89270.00
+2026-04-12 00:20:27.235 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:20:27.236 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:20:27.472 | DEBUG    | __main__:_fetch_one:76 -   AL30/ACCIONES: Instrument not found
+2026-04-12 00:20:27.475 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30 (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:20:27.646 | INFO     | __main__:fetch_ohlcv:158 -   AL30 [BONOS]: 309 bars  close=89270.00
+2026-04-12 00:20:35.479 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:20:35.480 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30D (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:20:35.664 | DEBUG    | __main__:_fetch_one:76 -   AL30D/ACCIONES: Instrument not found
+2026-04-12 00:20:35.665 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30D (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:20:35.799 | INFO     | __main__:fetch_ohlcv:158 -   AL30D [BONOS]: 309 bars  close=63.20
+2026-04-12 00:33:33.677 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:33:33.679 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:33:33.978 | DEBUG    | __main__:_fetch_one:76 -   AL30/ACCIONES: Instrument not found
+2026-04-12 00:33:33.979 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30 (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:33:34.167 | INFO     | __main__:fetch_ohlcv:158 -   AL30 [BONOS]: 309 bars  close=89270.00
+2026-04-12 00:33:57.421 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:33:57.422 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30D (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:33:57.745 | DEBUG    | __main__:_fetch_one:76 -   AL30D/ACCIONES: Instrument not found
+2026-04-12 00:33:57.746 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30D (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:33:57.884 | INFO     | __main__:fetch_ohlcv:158 -   AL30D [BONOS]: 309 bars  close=63.20
+2026-04-12 00:34:02.260 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:34:02.261 | INFO     | __main__:fetch_ohlcv:121 - Fetching BBDD (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:02.434 | DEBUG    | __main__:_fetch_one:76 -   BBDD/ACCIONES: Instrument not found
+2026-04-12 00:34:02.434 | INFO     | __main__:fetch_ohlcv:121 - Fetching BBDD (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:02.655 | DEBUG    | __main__:_fetch_one:76 -   BBDD/BONOS: Instrument not found
+2026-04-12 00:34:02.655 | INFO     | __main__:fetch_ohlcv:121 - Fetching BBDD (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:02.805 | INFO     | __main__:fetch_ohlcv:158 -   BBDD [CEDEARS]: 309 bars  close=4.22
+2026-04-12 00:34:11.712 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:34:11.713 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30D (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:11.893 | DEBUG    | __main__:_fetch_one:76 -   AL30D/ACCIONES: Instrument not found
+2026-04-12 00:34:11.894 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30D (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:12.035 | INFO     | __main__:fetch_ohlcv:158 -   AL30D [BONOS]: 309 bars  close=63.20
+2026-04-12 00:34:14.303 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:34:14.304 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:14.476 | DEBUG    | __main__:_fetch_one:76 -   AL30/ACCIONES: Instrument not found
+2026-04-12 00:34:14.476 | INFO     | __main__:fetch_ohlcv:121 - Fetching AL30 (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:14.609 | INFO     | __main__:fetch_ohlcv:158 -   AL30 [BONOS]: 309 bars  close=89270.00
+2026-04-12 00:34:21.004 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:34:21.005 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10100A (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:21.208 | DEBUG    | __main__:_fetch_one:76 -   GFGC10100A/ACCIONES: Instrument not found
+2026-04-12 00:34:21.208 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10100A (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:21.404 | DEBUG    | __main__:_fetch_one:76 -   GFGC10100A/BONOS: Instrument not found
+2026-04-12 00:34:21.404 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10100A (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:21.581 | DEBUG    | __main__:_fetch_one:76 -   GFGC10100A/CEDEARS: Instrument not found
+2026-04-12 00:34:21.581 | WARNING  | __main__:fetch_ohlcv:128 - No data returned for GFGC10100A (tried: ACCIONES, BONOS, CEDEARS)
+2026-04-12 00:34:24.815 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:34:24.816 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10126A (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:24.990 | DEBUG    | __main__:_fetch_one:76 -   GFGC10126A/ACCIONES: Instrument not found
+2026-04-12 00:34:24.990 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10126A (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:25.178 | DEBUG    | __main__:_fetch_one:76 -   GFGC10126A/BONOS: Instrument not found
+2026-04-12 00:34:25.179 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10126A (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:25.358 | DEBUG    | __main__:_fetch_one:76 -   GFGC10126A/CEDEARS: Instrument not found
+2026-04-12 00:34:25.359 | WARNING  | __main__:fetch_ohlcv:128 - No data returned for GFGC10126A (tried: ACCIONES, BONOS, CEDEARS)
+2026-04-12 00:34:28.610 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:34:28.611 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10550J (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:28.824 | DEBUG    | __main__:_fetch_one:76 -   GFGC10550J/ACCIONES: Instrument not found
+2026-04-12 00:34:28.824 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10550J (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:29.013 | DEBUG    | __main__:_fetch_one:76 -   GFGC10550J/BONOS: Instrument not found
+2026-04-12 00:34:29.014 | INFO     | __main__:fetch_ohlcv:121 - Fetching GFGC10550J (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:34:29.251 | DEBUG    | __main__:_fetch_one:76 -   GFGC10550J/CEDEARS: Instrument not found
+2026-04-12 00:34:29.251 | WARNING  | __main__:fetch_ohlcv:128 - No data returned for GFGC10550J (tried: ACCIONES, BONOS, CEDEARS)
+2026-04-12 00:39:52.528 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:39:52.529 | INFO     | __main__:fetch_ohlcv:132 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:39:52.830 | DEBUG    | __main__:_fetch_one:80 -   AL30/ACCIONES: Instrument not found
+2026-04-12 00:39:52.831 | INFO     | __main__:fetch_ohlcv:132 - Fetching AL30 (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:39:52.968 | INFO     | __main__:fetch_ohlcv:169 -   AL30 [BONOS]: 309 bars  close=89270.00
+2026-04-12 00:39:55.520 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:39:55.521 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10100A (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:39:55.706 | DEBUG    | __main__:_fetch_one:80 -   GFGC10100A/ACCIONES: Instrument not found
+2026-04-12 00:39:55.706 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10100A (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:39:55.894 | DEBUG    | __main__:_fetch_one:80 -   GFGC10100A/BONOS: Instrument not found
+2026-04-12 00:39:55.894 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10100A (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:39:56.068 | DEBUG    | __main__:_fetch_one:80 -   GFGC10100A/CEDEARS: Instrument not found
+2026-04-12 00:39:56.069 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10100A (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 00:39:56.547 | INFO     | __main__:fetch_ohlcv:169 -   GFGC10100A [OPCIONES]: 17 bars  close=0.72
+2026-04-12 00:40:00.506 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:40:00.507 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10126A (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:00.722 | DEBUG    | __main__:_fetch_one:80 -   GFGC10126A/ACCIONES: Instrument not found
+2026-04-12 00:40:00.722 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10126A (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:00.913 | DEBUG    | __main__:_fetch_one:80 -   GFGC10126A/BONOS: Instrument not found
+2026-04-12 00:40:00.913 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10126A (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:01.094 | DEBUG    | __main__:_fetch_one:80 -   GFGC10126A/CEDEARS: Instrument not found
+2026-04-12 00:40:01.095 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10126A (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 00:40:01.563 | WARNING  | __main__:fetch_ohlcv:139 - No data returned for GFGC10126A (tried: ACCIONES, BONOS, CEDEARS, OPCIONES)
+2026-04-12 00:40:04.419 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:40:04.420 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10524J (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:04.596 | DEBUG    | __main__:_fetch_one:80 -   GFGC10524J/ACCIONES: Instrument not found
+2026-04-12 00:40:04.597 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10524J (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:04.780 | DEBUG    | __main__:_fetch_one:80 -   GFGC10524J/BONOS: Instrument not found
+2026-04-12 00:40:04.780 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10524J (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:04.966 | DEBUG    | __main__:_fetch_one:80 -   GFGC10524J/CEDEARS: Instrument not found
+2026-04-12 00:40:04.966 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10524J (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 00:40:05.457 | INFO     | __main__:fetch_ohlcv:169 -   GFGC10524J [OPCIONES]: 18 bars  close=26.74
+2026-04-12 00:40:13.537 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:40:13.538 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10550J (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:13.714 | DEBUG    | __main__:_fetch_one:80 -   GFGC10550J/ACCIONES: Instrument not found
+2026-04-12 00:40:13.715 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10550J (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:13.906 | DEBUG    | __main__:_fetch_one:80 -   GFGC10550J/BONOS: Instrument not found
+2026-04-12 00:40:13.907 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10550J (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:14.082 | DEBUG    | __main__:_fetch_one:80 -   GFGC10550J/CEDEARS: Instrument not found
+2026-04-12 00:40:14.082 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10550J (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 00:40:14.567 | WARNING  | __main__:fetch_ohlcv:139 - No data returned for GFGC10550J (tried: ACCIONES, BONOS, CEDEARS, OPCIONES)
+2026-04-12 00:40:16.613 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:40:16.614 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10924A (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:16.815 | DEBUG    | __main__:_fetch_one:80 -   GFGC10924A/ACCIONES: Instrument not found
+2026-04-12 00:40:16.815 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10924A (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:17.005 | DEBUG    | __main__:_fetch_one:80 -   GFGC10924A/BONOS: Instrument not found
+2026-04-12 00:40:17.006 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10924A (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:17.190 | DEBUG    | __main__:_fetch_one:80 -   GFGC10924A/CEDEARS: Instrument not found
+2026-04-12 00:40:17.191 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10924A (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 00:40:17.681 | INFO     | __main__:fetch_ohlcv:169 -   GFGC10924A [OPCIONES]: 18 bars  close=0.26
+2026-04-12 00:40:21.559 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:40:21.563 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10950A (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:21.775 | DEBUG    | __main__:_fetch_one:80 -   GFGC10950A/ACCIONES: Instrument not found
+2026-04-12 00:40:21.775 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10950A (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:21.967 | DEBUG    | __main__:_fetch_one:80 -   GFGC10950A/BONOS: Instrument not found
+2026-04-12 00:40:21.967 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10950A (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:22.142 | DEBUG    | __main__:_fetch_one:80 -   GFGC10950A/CEDEARS: Instrument not found
+2026-04-12 00:40:22.143 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10950A (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 00:40:22.610 | WARNING  | __main__:fetch_ohlcv:139 - No data returned for GFGC10950A (tried: ACCIONES, BONOS, CEDEARS, OPCIONES)
+2026-04-12 00:40:24.699 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:40:24.701 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10950J (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:24.875 | DEBUG    | __main__:_fetch_one:80 -   GFGC10950J/ACCIONES: Instrument not found
+2026-04-12 00:40:24.876 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10950J (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:25.074 | DEBUG    | __main__:_fetch_one:80 -   GFGC10950J/BONOS: Instrument not found
+2026-04-12 00:40:25.075 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10950J (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:25.253 | DEBUG    | __main__:_fetch_one:80 -   GFGC10950J/CEDEARS: Instrument not found
+2026-04-12 00:40:25.253 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC10950J (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 00:40:25.735 | WARNING  | __main__:fetch_ohlcv:139 - No data returned for GFGC10950J (tried: ACCIONES, BONOS, CEDEARS, OPCIONES)
+2026-04-12 00:40:28.086 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:40:28.087 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC11324A (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:28.259 | DEBUG    | __main__:_fetch_one:80 -   GFGC11324A/ACCIONES: Instrument not found
+2026-04-12 00:40:28.259 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC11324A (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:28.447 | DEBUG    | __main__:_fetch_one:80 -   GFGC11324A/BONOS: Instrument not found
+2026-04-12 00:40:28.448 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC11324A (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:28.629 | DEBUG    | __main__:_fetch_one:80 -   GFGC11324A/CEDEARS: Instrument not found
+2026-04-12 00:40:28.630 | INFO     | __main__:fetch_ohlcv:132 - Fetching GFGC11324A (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 00:40:29.118 | INFO     | __main__:fetch_ohlcv:169 -   GFGC11324A [OPCIONES]: 18 bars  close=0.26
+2026-04-12 00:40:36.937 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 00:40:36.938 | INFO     | __main__:fetch_ohlcv:132 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 00:40:37.065 | INFO     | __main__:fetch_ohlcv:169 -   GGAL [ACCIONES]: 309 bars  close=7075.00
+2026-04-12 01:01:05.647 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 01:01:05.648 | INFO     | __main__:fetch_ohlcv:132 - Fetching AL30 (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:05.971 | DEBUG    | __main__:_fetch_one:80 -   AL30/ACCIONES: Instrument not found
+2026-04-12 01:01:05.972 | INFO     | __main__:fetch_ohlcv:132 - Fetching AL30 (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:06.144 | INFO     | __main__:fetch_ohlcv:169 -   AL30 [BONOS]: 309 bars  close=89270.00
+2026-04-12 01:01:10.900 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 01:01:10.902 | INFO     | __main__:fetch_ohlcv:132 - Fetching AL30D (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:11.130 | DEBUG    | __main__:_fetch_one:80 -   AL30D/ACCIONES: Instrument not found
+2026-04-12 01:01:11.131 | INFO     | __main__:fetch_ohlcv:132 - Fetching AL30D (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:11.447 | INFO     | __main__:fetch_ohlcv:169 -   AL30D [BONOS]: 309 bars  close=63.20
+2026-04-12 01:01:13.912 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 01:01:13.913 | INFO     | __main__:fetch_ohlcv:132 - Fetching BBDD (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:14.104 | DEBUG    | __main__:_fetch_one:80 -   BBDD/ACCIONES: Instrument not found
+2026-04-12 01:01:14.105 | INFO     | __main__:fetch_ohlcv:132 - Fetching BBDD (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:14.254 | DEBUG    | __main__:_fetch_one:80 -   BBDD/BONOS: Instrument not found
+2026-04-12 01:01:14.256 | INFO     | __main__:fetch_ohlcv:132 - Fetching BBDD (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:14.416 | INFO     | __main__:fetch_ohlcv:169 -   BBDD [CEDEARS]: 309 bars  close=4.22
+2026-04-12 01:01:17.459 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 01:01:17.459 | INFO     | __main__:fetch_ohlcv:132 - Fetching GGAL (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:17.604 | INFO     | __main__:fetch_ohlcv:169 -   GGAL [ACCIONES]: 309 bars  close=7075.00
+2026-04-12 01:01:20.539 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 01:01:20.540 | INFO     | __main__:fetch_ohlcv:132 - Fetching GGALD (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:20.690 | INFO     | __main__:fetch_ohlcv:169 -   GGALD [ACCIONES]: 309 bars  close=5.01
+2026-04-12 01:01:23.418 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 01:01:23.420 | INFO     | __main__:fetch_ohlcv:132 - Fetching PESOS_1D (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:23.602 | DEBUG    | __main__:_fetch_one:80 -   PESOS_1D/ACCIONES: Instrument not found
+2026-04-12 01:01:23.602 | INFO     | __main__:fetch_ohlcv:132 - Fetching PESOS_1D (BONOS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:23.817 | DEBUG    | __main__:_fetch_one:80 -   PESOS_1D/BONOS: Instrument not found
+2026-04-12 01:01:23.818 | INFO     | __main__:fetch_ohlcv:132 - Fetching PESOS_1D (CEDEARS/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:24.005 | DEBUG    | __main__:_fetch_one:80 -   PESOS_1D/CEDEARS: Instrument not found
+2026-04-12 01:01:24.006 | INFO     | __main__:fetch_ohlcv:132 - Fetching PESOS_1D (OPCIONES/A-24hs) 2026-03-13 → 2026-04-12
+2026-04-12 01:01:24.461 | DEBUG    | __main__:_fetch_one:80 -   PESOS_1D/OPCIONES: Instrument not found
+2026-04-12 01:01:24.462 | WARNING  | __main__:fetch_ohlcv:139 - No data returned for PESOS_1D (tried: ACCIONES, BONOS, CEDEARS, OPCIONES)
+2026-04-12 01:01:27.796 | INFO     | __main__:_make_ppi_client:52 - PPI authentication OK
+2026-04-12 01:01:27.797 | INFO     | __main__:fetch_ohlcv:132 - Fetching SUPV (ACCIONES/A-24hs) 2025-01-01 → 2026-04-12
+2026-04-12 01:01:27.941 | INFO     | __main__:fetch_ohlcv:169 -   SUPV [ACCIONES]: 309 bars  close=2867.50
