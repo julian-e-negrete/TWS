@@ -1,7 +1,9 @@
 # Changelog
 
 ## [2026-04-15]
-- [chore] Modified `tws_terminal/src/network/mod.rs`
+- [fix] Removed `NOT LIKE '%GFG%'` filter from recursive CTE instrument queries so options (GFGC/GFGV) appear in the Options sub-tab of Merval Historical
+- [fix] PPI OHLCV chart x-axis bounds corrected from `n` to `n-1` to prevent right-side clipping; date labels now show MM-DD instead of full YYYY-MM-DD
+- [fix] `tws_terminal/src/network/mod.rs`: corrected high/low field swap in `MatrizTick` deserialization
 
 ## [2026-04-12]
 - [feat] PPI OHLCV now auto-detects instrument type (ACCIONES/BONOS/CEDEARS) via `--type AUTO`; bonds like AL30 and CEDEARs now load correctly alongside stocks

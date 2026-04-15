@@ -411,7 +411,6 @@ pub async fn fetch_distinct_merval_instruments(client: &Client, _days: i64) -> R
          SELECT instrument FROM t
          WHERE instrument IS NOT NULL
            AND instrument NOT LIKE '%DDF_DLR%'
-           AND instrument NOT LIKE '%GFG%'
          ORDER BY instrument LIMIT 300",
 
         "WITH RECURSIVE t(instrument) AS (
@@ -428,7 +427,6 @@ pub async fn fetch_distinct_merval_instruments(client: &Client, _days: i64) -> R
          SELECT instrument FROM t
          WHERE instrument IS NOT NULL
            AND instrument NOT LIKE '%DDF_DLR%'
-           AND instrument NOT LIKE '%GFG%'
          ORDER BY instrument LIMIT 300",
 
         "WITH RECURSIVE t(instrument) AS (
@@ -445,7 +443,6 @@ pub async fn fetch_distinct_merval_instruments(client: &Client, _days: i64) -> R
          SELECT instrument FROM t
          WHERE instrument IS NOT NULL
            AND instrument NOT LIKE '%DDF_DLR%'
-           AND instrument NOT LIKE '%GFG%'
          ORDER BY instrument LIMIT 300",
     ];
 

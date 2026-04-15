@@ -2102,15 +2102,16 @@ impl TradingApp {
             .style(Style::default().fg(Color::DarkGray))
             .data(&lows);
 
-        // X-axis labels: first, middle, last date
+        // X-axis labels: first, middle, last date (trimmed to MM-DD to save space)
+        let trim_date = |d: &str| d.get(5..).unwrap_or(d).to_string();
         let x_labels: Vec<Span> = {
             let mut v = vec![
-                Span::styled(bars[0].date.clone(), Style::default().fg(Color::DarkGray)),
+                Span::styled(trim_date(&bars[0].date), Style::default().fg(Color::DarkGray)),
             ];
             if n > 2 {
-                v.push(Span::styled(bars[n / 2].date.clone(), Style::default().fg(Color::DarkGray)));
+                v.push(Span::styled(trim_date(&bars[n / 2].date), Style::default().fg(Color::DarkGray)));
             }
-            v.push(Span::styled(bars[n - 1].date.clone(), Style::default().fg(Color::DarkGray)));
+            v.push(Span::styled(trim_date(&bars[n - 1].date), Style::default().fg(Color::DarkGray)));
             v
         };
 
@@ -2120,7 +2121,7 @@ impl TradingApp {
                 " {} — PPI Daily ({} bars)  close {:.2}  {}{:.2}%  ",
                 short, n, last_close, sign, pct_chg
             )))
-            .x_axis(Axis::default().bounds([0.0, n as f64]).labels(x_labels))
+            .x_axis(Axis::default().bounds([0.0, (n - 1) as f64]).labels(x_labels))
             .y_axis(Axis::default().bounds([p_min - pad, p_max + pad])
                 .labels(vec![
                     Span::styled(format!("{:.2}", p_min), Style::default().fg(Color::DarkGray)),
