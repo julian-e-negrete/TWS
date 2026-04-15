@@ -1,5 +1,8 @@
 # Changelog
 
+## [2026-04-15]
+- [chore] Modified `tws_terminal/src/network/mod.rs`
+
 ## [2026-04-12]
 - [feat] PPI OHLCV now auto-detects instrument type (ACCIONES/BONOS/CEDEARS) via `--type AUTO`; bonds like AL30 and CEDEARs now load correctly alongside stocks
 - [refactor] Merval Historical tab simplified: removed TimescaleDB price-series query, `MervalTimeRange`, orders panel and `[o]`/`[t]` keybindings — PPI OHLCV chart is now the sole view, triggered directly on Enter

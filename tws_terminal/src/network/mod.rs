@@ -98,9 +98,10 @@ pub struct MatrizTick {
     pub ask_price: f64,
     #[serde(deserialize_with = "de_f64_or_str", default)]
     pub last_price: f64,
-    #[serde(deserialize_with = "de_f64_or_str", default)]
+    // The scraper stores high/low with swapped labels — compensate here.
+    #[serde(rename = "low", deserialize_with = "de_f64_or_str", default)]
     pub high: f64,
-    #[serde(deserialize_with = "de_f64_or_str", default)]
+    #[serde(rename = "high", deserialize_with = "de_f64_or_str", default)]
     pub low: f64,
     #[serde(deserialize_with = "de_f64_or_str", default)]
     pub prev_close: f64,
