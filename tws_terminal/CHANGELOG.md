@@ -1,5 +1,10 @@
 # Changelog
 
+## [2026-04-16]
+- [feat] US Futures live data migrated from Redis pub/sub to direct yfinance polling — new `us_futures/snapshot.py` module with `snapshot` and `ohlcv` modes; Rust polls every 15s via subprocess, OHLCV also fetched via yfinance instead of DB
+- [refactor] Removed `us_futures:ticks` Redis subscription from `websocket.rs`; removed `fetch_us_futures_ohlcv` and `fetch_us_futures_last_prices` DB functions
+- [chore] Added `serde` feature to chrono; added `#[derive(serde::Deserialize)]` to `UsFuturesOhlcv`
+
 ## [2026-04-15]
 - [fix] Removed `NOT LIKE '%GFG%'` filter from recursive CTE instrument queries so options (GFGC/GFGV) appear in the Options sub-tab of Merval Historical
 - [fix] PPI OHLCV chart x-axis bounds corrected from `n` to `n-1` to prevent right-side clipping; date labels now show MM-DD instead of full YYYY-MM-DD

@@ -1660,12 +1660,28 @@ impl TradingApp {
     fn trigger_us_futures_ohlcv(&self) {
         let Some(tx) = self.db_tx.clone() else { return };
         let sym = self.us_futures_symbols[self.us_futures_selected].to_string();
-        let client = self.db_client.clone();
         tokio::spawn(async move {
-            if let Some(c) = Self::get_db_client(client).await {
-                if let Ok(rows) = crate::db::fetch_us_futures_ohlcv(&c, &sym, 200).await {
-                    let _ = tx.send(DbMessage::UsFuturesOhlcv(rows));
+            let root = Self::project_root();
+            let python = root.join(".venv/bin/python3");
+            let result = tokio::process::Command::new(&python)
+                .args(["-m", "us_futures.snapshot", "ohlcv", "--symbol", &sym, "--limit", "200"])
+                .current_dir(&root)
+                .env("PYTHONPATH", &root)
+                .stdin(std::process::Stdio::null())
+                .output()
+                .await;
+            match result {
+                Ok(out) if out.status.success() => {
+                    match serde_json::from_slice::<Vec<crate::db::UsFuturesOhlcv>>(&out.stdout) {
+                        Ok(rows) => { let _ = tx.send(DbMessage::UsFuturesOhlcv(rows)); }
+                        Err(e)   => eprintln!("[US futures OHLCV] JSON parse error: {e}"),
+                    }
                 }
+                Ok(out) => {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    eprintln!("[US futures OHLCV] fetch error: {}", err.lines().last().unwrap_or("unknown"));
+                }
+                Err(e) => eprintln!("[US futures OHLCV] subprocess error: {e}"),
             }
         });
     }

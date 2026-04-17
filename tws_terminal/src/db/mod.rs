@@ -547,7 +547,7 @@ pub async fn fetch_instrument_orders(client: &Client, instrument: &str) -> Resul
 
 // ─── US Futures ───────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct UsFuturesOhlcv {
     pub time:   chrono::DateTime<chrono::Utc>,
     pub symbol: String,
@@ -556,35 +556,6 @@ pub struct UsFuturesOhlcv {
     pub low:    f64,
     pub close:  f64,
     pub volume: i64,
-}
-
-pub async fn fetch_us_futures_ohlcv(client: &Client, symbol: &str, limit: i64) -> Result<Vec<UsFuturesOhlcv>> {
-    let rows = client.query(
-        "SELECT time, symbol, open::float8, high::float8, low::float8, close::float8, volume
-         FROM us_futures_ohlcv WHERE symbol = $1
-         ORDER BY time DESC LIMIT $2",
-        &[&symbol, &limit],
-    ).await?;
-    let mut result: Vec<UsFuturesOhlcv> = rows.iter().map(|r| UsFuturesOhlcv {
-        time:   r.get(0),
-        symbol: r.get(1),
-        open:   r.get(2),
-        high:   r.get(3),
-        low:    r.get(4),
-        close:  r.get(5),
-        volume: r.get(6),
-    }).collect();
-    result.reverse(); // oldest first for chart
-    Ok(result)
-}
-
-pub async fn fetch_us_futures_last_prices(client: &Client) -> Result<Vec<(String, f64)>> {
-    let rows = client.query(
-        "SELECT DISTINCT ON (symbol) symbol, last_price::float8
-         FROM us_futures_ticks ORDER BY symbol, time DESC",
-        &[],
-    ).await?;
-    Ok(rows.iter().map(|r| (r.get::<_, String>(0), r.get::<_, f64>(1))).collect())
 }
 
 // ─── Markets tab ──────────────────────────────────────────────────────────────

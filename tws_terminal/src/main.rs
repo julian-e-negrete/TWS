@@ -42,12 +42,17 @@ async fn main() -> Result<()> {
     let (db_tx, mut db_rx) = mpsc::unbounded_channel::<ui::app::DbMessage>();
 
     // ── Spawn Redis subscriber on a separate Tokio task ──────────────────────
+    let ws_tx_redis = ws_tx.clone();
     let ws_handle = tokio::spawn(async move {
         // connect_websocket loops forever with retries — it never returns Ok
-        if let Err(e) = connect_websocket(ws_tx).await {
+        if let Err(e) = connect_websocket(ws_tx_redis).await {
             eprintln!("Redis subscriber fatal error: {e}");
         }
     });
+
+    // ── Spawn US Futures yfinance polling (15-second interval) ───────────────
+    let ws_tx_futures = ws_tx.clone();
+    tokio::spawn(network::websocket::poll_us_futures(ws_tx_futures));
 
     // ── Keyboard input on a dedicated OS thread (blocking read, not async) ───
     let mut key_rx = spawn_input_task();
@@ -73,7 +78,7 @@ async fn main() -> Result<()> {
                 terminal.draw(|f| app.render(f))?;
             }
 
-            // Redis data message
+            // Redis / yfinance data message
             Some(msg) = ws_rx.recv() => {
                 app.handle_websocket_message(msg);
             }
