@@ -1688,12 +1688,28 @@ impl TradingApp {
 
     fn trigger_markets_fetch(&self) {
         let Some(tx) = self.db_tx.clone() else { return };
-        let client = self.db_client.clone();
         tokio::spawn(async move {
-            if let Some(c) = Self::get_db_client(client).await {
-                if let Ok(rows) = crate::db::fetch_markets_live(&c).await {
-                    let _ = tx.send(DbMessage::MarketsData(rows));
+            let root = Self::project_root();
+            let python = root.join(".venv/bin/python3");
+            let result = tokio::process::Command::new(&python)
+                .args(["-m", "us_futures.snapshot", "markets"])
+                .current_dir(&root)
+                .env("PYTHONPATH", &root)
+                .stdin(std::process::Stdio::null())
+                .output()
+                .await;
+            match result {
+                Ok(out) if out.status.success() => {
+                    match serde_json::from_slice::<Vec<crate::db::MarketRow>>(&out.stdout) {
+                        Ok(rows) => { let _ = tx.send(DbMessage::MarketsData(rows)); }
+                        Err(e)   => eprintln!("[Markets] JSON parse error: {e}"),
+                    }
                 }
+                Ok(out) => {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    eprintln!("[Markets] fetch error: {}", err.lines().last().unwrap_or("unknown"));
+                }
+                Err(e) => eprintln!("[Markets] subprocess error: {e}"),
             }
         });
     }

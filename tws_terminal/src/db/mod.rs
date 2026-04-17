@@ -560,56 +560,11 @@ pub struct UsFuturesOhlcv {
 
 // ─── Markets tab ──────────────────────────────────────────────────────────────
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct MarketRow {
     pub symbol:      String,
     pub last_price:  f64,
     pub change_pct:  f64,
     pub region:      String,
     pub asset_class: String,
-}
-
-pub async fn fetch_markets_live(client: &Client) -> Result<Vec<MarketRow>> {
-    // Latest price per symbol from us_futures_ticks
-    let price_rows = client.query(
-        "SELECT DISTINCT ON (symbol) symbol, last_price::float8, region, asset_class
-         FROM us_futures_ticks
-         WHERE time > NOW() - INTERVAL '2 days'
-         ORDER BY symbol, time DESC",
-        &[],
-    ).await?;
-
-    // Daily change % from us_futures_ohlcv
-    let chg_rows = client.query(
-        "SELECT DISTINCT ON (symbol) symbol,
-                (CASE WHEN open > 0 THEN (close - open) / open * 100.0 ELSE 0 END)::float8 AS chg_pct
-         FROM us_futures_ohlcv
-         WHERE time > NOW() - INTERVAL '2 days'
-         ORDER BY symbol, time DESC",
-        &[],
-    ).await?;
-
-    let mut chg_map: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-    for r in &chg_rows {
-        let sym: String = r.get(0);
-        let chg: f64    = r.get(1);
-        chg_map.insert(sym, chg);
-    }
-
-    let rows = price_rows.iter().map(|r| {
-        let symbol:      String         = r.get(0);
-        let last_price:  f64            = r.get(1);
-        let region:      Option<String> = r.get(2);
-        let asset_class: Option<String> = r.get(3);
-        let change_pct = chg_map.get(&symbol).copied().unwrap_or(0.0);
-        MarketRow {
-            symbol,
-            last_price,
-            change_pct,
-            region:      region.unwrap_or_default(),
-            asset_class: asset_class.unwrap_or_default(),
-        }
-    }).collect();
-
-    Ok(rows)
 }

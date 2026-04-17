@@ -1,5 +1,8 @@
 # Changelog
 
+## [2026-04-17]
+- [feat] Markets tab migrated to yfinance — new `markets` mode in `us_futures/snapshot.py` fetches 29 symbols (indices, futures, FX, LatAm) with last_price and daily change%; removed `fetch_markets_live` DB function; `MarketRow` now derives `serde::Deserialize`
+
 ## [2026-04-16]
 - [feat] US Futures live data migrated from Redis pub/sub to direct yfinance polling — new `us_futures/snapshot.py` module with `snapshot` and `ohlcv` modes; Rust polls every 15s via subprocess, OHLCV also fetched via yfinance instead of DB
 - [refactor] Removed `us_futures:ticks` Redis subscription from `websocket.rs`; removed `fetch_us_futures_ohlcv` and `fetch_us_futures_last_prices` DB functions
