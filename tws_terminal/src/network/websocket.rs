@@ -135,6 +135,44 @@ pub async fn poll_us_futures(tx: UnboundedSender<WebSocketMessage>) {
     }
 }
 
+// ── Markets tab polling via yfinance ─────────────────────────────────────────
+
+/// Polls yfinance every 60 seconds for all Markets-tab symbols.
+/// Sends `DbMessage::MarketsData` on each cycle.
+pub async fn poll_markets(tx: tokio::sync::mpsc::UnboundedSender<crate::ui::app::DbMessage>) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        interval.tick().await;
+
+        let root = project_root();
+        let python = root.join(".venv/bin/python3");
+
+        let result = tokio::process::Command::new(&python)
+            .args(["-m", "us_futures.snapshot", "markets"])
+            .current_dir(&root)
+            .env("PYTHONPATH", &root)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .await;
+
+        match result {
+            Ok(out) if out.status.success() => {
+                match serde_json::from_slice::<Vec<crate::db::MarketRow>>(&out.stdout) {
+                    Ok(rows) => { let _ = tx.send(crate::ui::app::DbMessage::MarketsData(rows)); }
+                    Err(e)   => eprintln!("[Markets poll] JSON parse error: {e}"),
+                }
+            }
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                eprintln!("[Markets poll] fetch error: {}", err.lines().last().unwrap_or("unknown"));
+            }
+            Err(e) => eprintln!("[Markets poll] subprocess error: {e}"),
+        }
+    }
+}
+
 fn project_root() -> std::path::PathBuf {
     let cwd = std::env::current_dir().unwrap_or_default();
     if !cwd.join("us_futures").exists() && cwd.join("../us_futures").exists() {

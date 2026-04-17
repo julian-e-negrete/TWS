@@ -54,6 +54,10 @@ async fn main() -> Result<()> {
     let ws_tx_futures = ws_tx.clone();
     tokio::spawn(network::websocket::poll_us_futures(ws_tx_futures));
 
+    // ── Spawn Markets tab yfinance polling (60-second interval) ──────────────
+    let db_tx_markets = db_tx.clone();
+    tokio::spawn(network::websocket::poll_markets(db_tx_markets));
+
     // ── Keyboard input on a dedicated OS thread (blocking read, not async) ───
     let mut key_rx = spawn_input_task();
 

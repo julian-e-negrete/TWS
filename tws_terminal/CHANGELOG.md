@@ -1,6 +1,7 @@
 # Changelog
 
 ## [2026-04-17]
+- [feat] Markets tab auto-refreshes every 60 seconds via `poll_markets` background task (same pattern as US futures 15s poll)
 - [feat] Markets tab migrated to yfinance — new `markets` mode in `us_futures/snapshot.py` fetches 29 symbols (indices, futures, FX, LatAm) with last_price and daily change%; removed `fetch_markets_live` DB function; `MarketRow` now derives `serde::Deserialize`
 
 ## [2026-04-16]
