@@ -1,6 +1,9 @@
 # Changelog
 
 ## [2026-04-17]
+- [feat] Binance Historical tab: instrument list (↑↓) + Enter loads 1-min OHLCV chart for selected symbol
+- [fix] Binance real-time chart slope: `BinanceSymbolData::update()` now accepts `bar_ts`; appends a new price point only when the candle timestamp advances, overwriting the last point in-place within the same candle — keeps x-axis density uniform with historical bars
+
 - [feat] Markets tab auto-refreshes every 60 seconds via `poll_markets` background task (same pattern as US futures 15s poll)
 - [feat] Markets tab migrated to yfinance — new `markets` mode in `us_futures/snapshot.py` fetches 29 symbols (indices, futures, FX, LatAm) with last_price and daily change%; removed `fetch_markets_live` DB function; `MarketRow` now derives `serde::Deserialize`
 

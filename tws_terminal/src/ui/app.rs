@@ -283,6 +283,10 @@ pub struct TradingApp {
     pub available_instruments:     Vec<String>,
     pub available_dates:           Vec<String>,
     pub available_binance_symbols: Vec<String>,
+    /// Binance Historical instrument list selection
+    pub binance_hist_sym_idx:   usize,
+    pub binance_hist_sym_state: ratatui::widgets::ListState,
+    pub binance_hist_chart_sym: Option<String>,
     /// Dropdown for AddingFavorite mode
     pub fav_dropdown:     Vec<String>,
     pub fav_dropdown_idx: usize,
@@ -375,6 +379,9 @@ impl TradingApp {
             available_instruments:     Vec::new(),
             available_dates:           Vec::new(),
             available_binance_symbols: Vec::new(),
+            binance_hist_sym_idx:   0,
+            binance_hist_sym_state: ratatui::widgets::ListState::default(),
+            binance_hist_chart_sym: None,
             fav_dropdown:     Vec::new(),
             fav_dropdown_idx: 0,
             options_underlyings:    vec!["GGAL", "SUPV", "PBRD", "PAMP", "YPFD"],
@@ -1039,7 +1046,7 @@ impl TradingApp {
                     .symbol_map
                     .entry(tick.symbol.clone())
                     .or_insert_with(|| BinanceSymbolData::new(&tick.symbol));
-                data.update(tick.open, tick.high, tick.low, tick.close, tick.volume);
+                data.update(tick.open, tick.high, tick.low, tick.close, tick.volume, &tick.timestamp);
 
                 // Seed historical price data on first tick for this symbol (reuses shared client)
                 if is_new && !self.seeded_symbols.contains(&tick.symbol) {
@@ -1164,7 +1171,10 @@ impl TradingApp {
                         ExchangeTab::Binance => {
                             self.binance_subtab = self.binance_subtab.toggle();
                             if self.binance_subtab == SubTab::Historical {
-                                self.trigger_historical_fetch();
+                                if self.available_binance_symbols.is_empty() {
+                                    self.trigger_historical_fetch();
+                                }
+                                self.binance_hist_sym_state.select(Some(self.binance_hist_sym_idx));
                             }
                         }
                         ExchangeTab::Merval => {
@@ -1216,6 +1226,11 @@ impl TradingApp {
                     if self.active_tab == ExchangeTab::Options {
                         self.options_loading = false;
                         self.trigger_options_fetch();
+                    } else if self.active_tab == ExchangeTab::Binance && self.binance_subtab == SubTab::Historical {
+                        if !self.available_binance_symbols.is_empty() {
+                            self.hist_binance_ticks.clear();
+                            self.trigger_binance_hist_chart();
+                        }
                     } else if self.active_tab == ExchangeTab::Merval && self.merval_subtab == SubTab::Historical {
                         if let Some(idx) = self.merval_inst_list_state.selected() {
                             if let Some(instr) = self.merval_instruments.get(idx).cloned() {
@@ -1377,14 +1392,18 @@ impl TradingApp {
                                 _ => SubTab::RealTime,
                             };
                             if subtab == SubTab::Historical {
-                                if self.active_tab == ExchangeTab::Merval {
-                                    // Navigate instrument list
-                                    let cur = self.merval_inst_list_state.selected().unwrap_or(0);
-                                    if cur > 0 {
-                                        self.merval_inst_list_state.select(Some(cur - 1));
+                                match self.active_tab {
+                                    ExchangeTab::Merval => {
+                                        let cur = self.merval_inst_list_state.selected().unwrap_or(0);
+                                        if cur > 0 { self.merval_inst_list_state.select(Some(cur - 1)); }
                                     }
-                                } else {
-                                    self.hist_scroll(-1);
+                                    ExchangeTab::Binance => {
+                                        if self.binance_hist_sym_idx > 0 {
+                                            self.binance_hist_sym_idx -= 1;
+                                            self.binance_hist_sym_state.select(Some(self.binance_hist_sym_idx));
+                                        }
+                                    }
+                                    _ => self.hist_scroll(-1),
                                 }
                             } else {
                                 match self.active_tab {
@@ -1432,13 +1451,20 @@ impl TradingApp {
                                 _ => SubTab::RealTime,
                             };
                             if subtab == SubTab::Historical {
-                                if self.active_tab == ExchangeTab::Merval {
-                                    let cur = self.merval_inst_list_state.selected().unwrap_or(0);
-                                    if cur + 1 < self.merval_instruments.len() {
-                                        self.merval_inst_list_state.select(Some(cur + 1));
+                                match self.active_tab {
+                                    ExchangeTab::Merval => {
+                                        let cur = self.merval_inst_list_state.selected().unwrap_or(0);
+                                        if cur + 1 < self.merval_instruments.len() {
+                                            self.merval_inst_list_state.select(Some(cur + 1));
+                                        }
                                     }
-                                } else {
-                                    self.hist_scroll(1);
+                                    ExchangeTab::Binance => {
+                                        if self.binance_hist_sym_idx + 1 < self.available_binance_symbols.len() {
+                                            self.binance_hist_sym_idx += 1;
+                                            self.binance_hist_sym_state.select(Some(self.binance_hist_sym_idx));
+                                        }
+                                    }
+                                    _ => self.hist_scroll(1),
                                 }
                             } else {
                                 match self.active_tab {
@@ -1657,6 +1683,23 @@ impl TradingApp {
         }
     }
 
+    fn trigger_binance_hist_chart(&mut self) {
+        let Some(sym) = self.available_binance_symbols.get(self.binance_hist_sym_idx).cloned() else { return };
+        let Some(tx) = self.db_tx.clone() else { return };
+        self.binance_hist_chart_sym = Some(sym.clone());
+        self.hist_loading = true;
+        self.hist_error = None;
+        let client = self.db_client.clone();
+        tokio::spawn(async move {
+            let Some(c) = Self::get_db_client(client).await else { return };
+            let f = crate::db::HistFilter { instrument: Some(sym), date: None };
+            match crate::db::fetch_binance_ticks(&c, 300, &f).await {
+                Ok(rows) => { let _ = tx.send(DbMessage::BinanceTicks(rows)); }
+                Err(e)   => { let _ = tx.send(DbMessage::Error(format!("{e}"))); }
+            }
+        });
+    }
+
     fn trigger_us_futures_ohlcv(&self) {
         let Some(tx) = self.db_tx.clone() else { return };
         let sym = self.us_futures_symbols[self.us_futures_selected].to_string();
@@ -1778,8 +1821,7 @@ impl TradingApp {
             self.render_filter_bar(chunks[3], frame);
             match (self.active_tab, active_subtab) {
                 (ExchangeTab::Binance, SubTab::Historical) => {
-                    self.render_historical_placeholder("Binance", chunks[4], frame);
-                    self.render_historical_placeholder_bottom("Binance", chunks[5], frame);
+                    self.render_binance_historical(chunks[4], chunks[5], frame);
                 }
                 (ExchangeTab::Merval, SubTab::Historical) => {
                     self.render_merval_historical(chunks[4], chunks[5], frame);
@@ -1871,6 +1913,108 @@ impl TradingApp {
             "Binance" => self.render_binance_trades_table(area, frame),
             _         => self.render_merval_orders_table_hist(area, frame),
         }
+    }
+
+    fn render_binance_historical(&mut self, top: Rect, _bottom: Rect, frame: &mut Frame) {
+        let h = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(20), Constraint::Min(0)])
+            .split(top);
+
+        // ── Instrument list ──
+        let syms = self.available_binance_symbols.clone();
+        let items: Vec<ListItem> = syms.iter().enumerate().map(|(i, sym)| {
+            let selected = self.binance_hist_chart_sym.as_deref() == Some(sym.as_str());
+            let style = if selected {
+                Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(Span::styled(format!(" {} ", sym), style))
+        }).collect();
+        let count = items.len();
+        frame.render_stateful_widget(
+            List::new(items)
+                .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD))
+                .highlight_symbol("▶ ")
+                .block(Block::default().borders(Borders::ALL)
+                    .title(format!(" Symbols ({}) [↑↓][Enter] ", count))),
+            h[0],
+            &mut self.binance_hist_sym_state,
+        );
+
+        // ── Chart panel ──
+        let sym = match &self.binance_hist_chart_sym {
+            Some(s) => s.clone(),
+            None => {
+                frame.render_widget(
+                    Paragraph::new("  Select a symbol and press [Enter] to load chart")
+                        .style(Style::default().fg(Color::DarkGray))
+                        .block(Block::default().borders(Borders::ALL).title(" Chart ")),
+                    h[1],
+                );
+                return;
+            }
+        };
+
+        if self.hist_loading && self.hist_binance_ticks.is_empty() {
+            frame.render_widget(
+                Paragraph::new(format!("  Loading {}…", sym))
+                    .block(Block::default().borders(Borders::ALL).title(format!(" {} — Binance 1-min bars ", sym))),
+                h[1],
+            );
+            return;
+        }
+
+        // hist_binance_ticks is returned DESC; reverse for chart (oldest → newest)
+        let bars: Vec<_> = self.hist_binance_ticks.iter().rev().collect();
+        if bars.is_empty() {
+            frame.render_widget(
+                Paragraph::new("  No data — press [Enter] to reload")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .block(Block::default().borders(Borders::ALL).title(format!(" {} ", sym))),
+                h[1],
+            );
+            return;
+        }
+
+        let points: Vec<(f64, f64)> = bars.iter().enumerate()
+            .map(|(i, b)| (i as f64, b.close))
+            .collect();
+        let closes: Vec<f64> = bars.iter().map(|b| b.close).collect();
+        let min = closes.iter().cloned().fold(f64::MAX, f64::min);
+        let max = closes.iter().cloned().fold(f64::MIN, f64::max);
+        let pad = (max - min) * 0.05 + 0.0001;
+        let n = points.len();
+        let color = if closes.last() >= closes.first() { Color::Green } else { Color::Red };
+        let last = closes.last().copied().unwrap_or(0.0);
+        let first = closes.first().copied().unwrap_or(last);
+        let pct = if first > 0.0 { (last - first) / first * 100.0 } else { 0.0 };
+        let tz = chrono::FixedOffset::west_opt(0).unwrap();
+        let x_labels = if n >= 2 {
+            vec![
+                Span::styled(bars[0].timestamp.with_timezone(&tz).format("%m/%d %H:%M").to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled(bars[n / 2].timestamp.with_timezone(&tz).format("%m/%d %H:%M").to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled(bars[n - 1].timestamp.with_timezone(&tz).format("%m/%d %H:%M").to_string(), Style::default().fg(Color::DarkGray)),
+            ]
+        } else { vec![] };
+
+        let dataset = Dataset::default()
+            .marker(symbols::Marker::Braille)
+            .graph_type(GraphType::Line)
+            .style(Style::default().fg(color))
+            .data(&points);
+        let sign = if pct >= 0.0 { "+" } else { "" };
+        let chart = Chart::new(vec![dataset])
+            .block(Block::default().borders(Borders::ALL)
+                .title(format!(" {} — {} bars  {:.4}  {}{:.2}%  ", sym, n, last, sign, pct)))
+            .x_axis(Axis::default().bounds([0.0, (n - 1) as f64]).labels(x_labels))
+            .y_axis(Axis::default().bounds([min - pad, max + pad])
+                .labels(vec![
+                    Span::styled(format!("{:.4}", min), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:.4}", max), Style::default().fg(Color::DarkGray)),
+                ]));
+        frame.render_widget(chart, h[1]);
     }
 
     fn render_binance_ticks_table(&mut self, area: Rect, frame: &mut Frame) {

@@ -74,10 +74,12 @@ pub struct BinanceSymbolData {
     pub volume: f64,
     /// close × volume — USD-equivalent volume used for cross-symbol sorting
     pub usd_volume: f64,
-    /// Sparkline history: normalised as relative integers within the symbol's own range
+    /// One point per closed candle — x-axis stays in sync with historical bars.
     pub price_history: Vec<u64>,
     pub daily_change_pct: f64,
     pub last_update: String,
+    /// Timestamp of the last candle appended to price_history.
+    last_bar_ts: String,
 }
 
 impl BinanceSymbolData {
@@ -90,10 +92,10 @@ impl BinanceSymbolData {
             close: 0.0,
             volume: 0.0,
             usd_volume: 0.0,
-            // Start EMPTY — no leading zeros that would flatten the sparkline
             price_history: Vec::new(),
             daily_change_pct: 0.0,
             last_update: "Waiting...".to_string(),
+            last_bar_ts: String::new(),
         }
     }
 
@@ -110,7 +112,7 @@ impl BinanceSymbolData {
         }
     }
 
-    pub fn update(&mut self, open: f64, high: f64, low: f64, close: f64, volume: f64) {
+    pub fn update(&mut self, open: f64, high: f64, low: f64, close: f64, volume: f64, bar_ts: &str) {
         // Lock the session open price on the first tick received
         if self.open == 0.0 && open > 0.0 {
             self.open = open;
@@ -119,20 +121,25 @@ impl BinanceSymbolData {
         self.low = low;
         self.close = close;
         self.volume = volume;
-        // USD-equivalent: multiply by close so all symbols are on the same scale
         self.usd_volume = close * volume;
 
         if self.open > 0.0 {
             self.daily_change_pct = ((close - self.open) / self.open) * 100.0;
         }
 
-        // Store close as a u64 integer (×100) so ratatui's Sparkline can draw it.
-        // The Sparkline auto-scales to the min/max of the slice, so the absolute
-        // magnitude doesn't matter — only relative movement within the symbol.
         let scaled = (close * 100.0) as u64;
-        self.price_history.push(scaled);
-        if self.price_history.len() > 500 {
-            self.price_history.remove(0);
+        if bar_ts != self.last_bar_ts {
+            // New candle — append a point so x-axis advances at the same rate as historical bars
+            self.price_history.push(scaled);
+            if self.price_history.len() > 500 {
+                self.price_history.remove(0);
+            }
+            self.last_bar_ts = bar_ts.to_string();
+        } else {
+            // Same candle still updating — overwrite the last point in-place
+            if let Some(last) = self.price_history.last_mut() {
+                *last = scaled;
+            }
         }
 
         self.last_update = Local::now().format("%H:%M:%S").to_string();
