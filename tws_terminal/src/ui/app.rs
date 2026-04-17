@@ -912,7 +912,7 @@ impl TradingApp {
             let mut seen = std::collections::HashSet::new();
             items.retain(|n| seen.insert(n.headline.clone()));
 
-            items.sort_by(|a, b| b.time.cmp(&a.time));
+            items.sort_by(|a, b| b.time.cmp(&a.time).then(a.source.cmp(&b.source)));
 
             // Persist to Redis with 30-minute TTL so the next open is instant
             if !items.is_empty() {
